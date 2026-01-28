@@ -12,6 +12,15 @@ const App: React.FC = () => {
   const [copySuccess, setCopySuccess] = useState<string>('');
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
   
+  // Model Selection State
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
+  const models = [
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)' },
+    { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)' },
+    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite (Latest)' },
+  ];
+
   // API Key Management State
   const [apiKeyInput, setApiKeyInput] = useState<string>('');
   const [activeApiKey, setActiveApiKey] = useState<string>('');
@@ -123,7 +132,7 @@ const App: React.FC = () => {
     setCopySuccess('');
 
     try {
-      const result = await transcribeVideo(videoFile, videoDuration, keyToUse);
+      const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel);
       if (result.startsWith('Error:')) {
           setError(result);
           setTranscript(null);
@@ -194,35 +203,54 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 text-white flex flex-col items-center">
       
-      {/* API Key Panel - Notepad Style */}
+      {/* Top Panel: API Key & Model Selection */}
       <div className="w-full bg-gray-800 bg-opacity-90 backdrop-blur-md border-b border-gray-700 p-2 sticky top-0 z-50 shadow-xl">
-        <div className="max-w-4xl mx-auto flex flex-col space-y-1.5">
-          <div className="flex items-center justify-between px-2">
+        <div className="max-w-4xl mx-auto flex flex-col space-y-2">
+          {/* Top Row: Labels and Action Buttons */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-2">
             <div className="flex items-center space-x-3">
               <label className="text-xs font-bold text-blue-400 uppercase tracking-widest">API key :</label>
               {apiKeyStatus && <span className="text-[10px] text-gray-400 italic bg-gray-900 px-2 py-0.5 rounded">{apiKeyStatus}</span>}
             </div>
-            <div className="flex space-x-2">
-              <button 
-                onClick={handleSendKey}
-                className="px-4 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
-              >
-                send
-              </button>
-              <button 
-                onClick={handleCopyKey}
-                className="px-4 py-1 bg-gray-600 hover:bg-gray-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
-              >
-                Copy
-              </button>
-              <button 
-                onClick={handleClearKey}
-                className="px-4 py-1 bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
-              >
-                Clear
-              </button>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <label className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">Text Model :</label>
+                <select 
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-gray-900 border border-gray-700 text-gray-100 text-[11px] rounded-md px-2 py-1 focus:ring-1 focus:ring-purple-500 outline-none cursor-pointer transition-colors"
+                >
+                  {models.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex space-x-1">
+                <button 
+                  onClick={handleSendKey}
+                  className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
+                >
+                  send
+                </button>
+                <button 
+                  onClick={handleCopyKey}
+                  className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
+                >
+                  Copy
+                </button>
+                <button 
+                  onClick={handleClearKey}
+                  className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold rounded uppercase transition-all shadow-md active:scale-95"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           </div>
+          
+          {/* Bottom Row: API Key Input */}
           <input 
             type="text"
             value={apiKeyInput}
@@ -240,7 +268,7 @@ const App: React.FC = () => {
             Gemini Video Transcriber
           </h1>
           <p className="mt-4 text-lg text-gray-300">
-            Upload a video to get a timestamped transcript using Gemini 3 Pro.
+            Upload a video to get a timestamped transcript using <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>.
           </p>
         </header>
 

@@ -14,7 +14,12 @@ const formatDurationForPrompt = (seconds: number): string => {
     return `${formattedMinutes}:${formattedSeconds}`;
 };
 
-export const transcribeVideo = async (videoFile: File, duration: number | null, apiKey: string): Promise<string> => {
+export const transcribeVideo = async (
+  videoFile: File, 
+  duration: number | null, 
+  apiKey: string,
+  modelName: string = 'gemini-3-flash-preview'
+): Promise<string> => {
   try {
     // Initialize with the manually provided key or existing environment variable
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
@@ -40,7 +45,7 @@ export const transcribeVideo = async (videoFile: File, duration: number | null, 
     };
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: modelName,
       contents: { parts: [textPart, videoPart] },
     });
 
@@ -53,6 +58,9 @@ export const transcribeVideo = async (videoFile: File, duration: number | null, 
         }
         if (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID')) {
             return 'Error: The provided API key is invalid or not authorized. Please check your API key.';
+        }
+        if (error.message.includes('not found')) {
+            return `Error: The selected model '${modelName}' was not found or is not available.`;
         }
         return `Error: ${error.message}`;
     }
