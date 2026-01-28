@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Video Transcriber - ถอดข้อความจากเสียง Video",
+  "description": "Uses Gemini Pro to analyze video files and generate a timestamped transcript of the audio, without translation or analysis.",
+  "requestFramePermissions": []
+}
