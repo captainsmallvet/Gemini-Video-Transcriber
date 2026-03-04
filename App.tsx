@@ -15,10 +15,15 @@ const App: React.FC = () => {
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
   const models = [
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)' },
-    { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)' },
-    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite (Latest)' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro Preview' },
+    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
+    { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
+    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { id: 'gemini-pro-latest', name: 'Gemini Pro (Latest Stable)' },
   ];
 
   // API Key Management State
