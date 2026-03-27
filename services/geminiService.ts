@@ -34,23 +34,23 @@ export const transcribeVideo = async (
     };
 
     let promptText = `Please transcribe the audio from this video verbatim in its original language. 
-    Do not translate, summarize, or analyze. 
-    Output the transcription as a JSON array of objects, breaking it down into short, natural sentences or phrases suitable for subtitles.
+    Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the video.
+    Output the transcription as a JSON array of objects. 
+    Break the transcription into natural sentences or logical phrases.
     Each object must have:
     - "start": start time in seconds (number)
     - "end": end time in seconds (number)
     - "text": the transcribed text for that segment.
     
-    Keep segments relatively short (ideally under 7-10 words or 2-4 seconds) for better readability as subtitles.
-    Ensure the timestamps are accurate to the audio. 
+    Ensure the timestamps are accurate to the audio. Do not skip any parts of the video.
     Example output format:
     [
-      {"start": 0.5, "end": 2.1, "text": "สวัสดีครับทุกท่าน"},
-      {"start": 2.2, "end": 4.5, "text": "วันนี้เราจะมาเรียนรู้วิธีการ"}
+      {"start": 0.5, "end": 5.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+      {"start": 5.3, "end": 10.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
     ]`;
 
     if (duration !== null) {
-        promptText += `\nNote: The total video duration is ${duration} seconds.`;
+        promptText += `\nNote: The video is approximately ${Math.floor(duration / 60)} minutes and ${Math.round(duration % 60)} seconds long. Please ensure the transcript covers the entire duration.`;
     }
 
     const textPart = {
