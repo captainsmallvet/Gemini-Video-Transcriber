@@ -9,6 +9,7 @@ const App: React.FC = () => {
   const [segments, setSegments] = useState<{start: number, end: number, text: string}[]>([]);
   const [activeTab, setActiveTab] = useState<'txt' | 'srt'>('txt');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [progressMessage, setProgressMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [copySuccess, setCopySuccess] = useState<string>('');
@@ -134,12 +135,15 @@ const App: React.FC = () => {
     }
 
     setIsLoading(true);
+    setProgressMessage('Starting transcription...');
     setError(null);
     setTranscript(null);
     setCopySuccess('');
 
     try {
-      const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel);
+      const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
+          setProgressMessage(msg);
+      });
       if (result.startsWith('Error:')) {
           setError(result);
           setTranscript(null);
@@ -397,7 +401,12 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {isLoading && <Spinner />}
+          {isLoading && (
+            <div className="flex flex-col items-center">
+              <Spinner />
+              <p className="text-blue-400 mt-4 text-sm font-mono animate-pulse">{progressMessage}</p>
+            </div>
+          )}
 
           {transcript && (
             <div className="space-y-4">
