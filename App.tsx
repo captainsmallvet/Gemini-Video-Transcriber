@@ -221,7 +221,7 @@ const App: React.FC = () => {
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
         : videoFile.name;
       const filename = `${baseFilename}.srt`;
-      const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([srtContent], { type: 'application/octet-stream' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       link.download = filename;
