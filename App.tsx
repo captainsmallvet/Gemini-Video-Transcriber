@@ -7,6 +7,7 @@ const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [segments, setSegments] = useState<{start: number, end: number, text: string}[]>([]);
+  const [activeTab, setActiveTab] = useState<'txt' | 'srt'>('txt');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -208,15 +209,27 @@ const App: React.FC = () => {
     return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
   };
 
+  const generateSRTText = () => {
+    if (segments.length === 0) return "";
+    let srtContent = '';
+    segments.forEach((seg, index) => {
+      srtContent += `${index + 1}\n`;
+      srtContent += `${formatSRTTimestamp(seg.start)} --> ${formatSRTTimestamp(seg.end)}\n`;
+      srtContent += `${seg.text}\n\n`;
+    });
+    return srtContent;
+  };
+
+  const generateTXTText = () => {
+    if (segments.length > 0) {
+      return segments.map(s => `[${formatDuration(s.start)} - ${formatDuration(s.end)}] ${s.text}`).join('\n');
+    }
+    return transcript || "";
+  };
+
   const handleSaveSRT = () => {
     if (segments.length > 0 && videoFile) {
-      let srtContent = '';
-      segments.forEach((seg, index) => {
-        srtContent += `${index + 1}\n`;
-        srtContent += `${formatSRTTimestamp(seg.start)} --> ${formatSRTTimestamp(seg.end)}\n`;
-        srtContent += `${seg.text}\n\n`;
-      });
-
+      const srtContent = generateSRTText();
       const baseFilename = videoFile.name.lastIndexOf('.') > -1
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
         : videoFile.name;
@@ -238,11 +251,7 @@ const App: React.FC = () => {
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
         : videoFile.name;
       
-      let contentToSave = transcript;
-      // If it's JSON, make it readable text for the .txt file
-      if (segments.length > 0) {
-        contentToSave = segments.map(s => `[${formatDuration(s.start)} - ${formatDuration(s.end)}] ${s.text}`).join('\n');
-      }
+      const contentToSave = generateTXTText();
 
       const durationString = videoDuration ? ` ${formatDuration(videoDuration)}` : '';
       const filename = `audio script with timestamp - ${baseFilename}${durationString}.txt`;
@@ -392,8 +401,22 @@ const App: React.FC = () => {
 
           {transcript && (
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-100">Transcript</h2>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex bg-gray-900 bg-opacity-50 p-1 rounded-lg border border-gray-700">
+                  <button 
+                    onClick={() => setActiveTab('txt')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'txt' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    Text View (.txt)
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('srt')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'srt' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    SRT View (.srt)
+                  </button>
+                </div>
+                
                 <div className="flex items-center space-x-2">
                   <button onClick={copyToClipboard} className="flex items-center space-x-2 px-3 py-1.5 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors text-sm">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -401,14 +424,15 @@ const App: React.FC = () => {
                     </svg>
                     <span>{copySuccess || 'Copy'}</span>
                   </button>
-                  <button onClick={handleSave} className="flex items-center space-x-2 px-3 py-1.5 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors text-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <span>Save .txt</span>
-                  </button>
-                  {segments.length > 0 && (
-                    <button onClick={handleSaveSRT} className="flex items-center space-x-2 px-3 py-1.5 bg-blue-700 rounded-md hover:bg-blue-600 transition-colors text-sm">
+                  {activeTab === 'txt' ? (
+                    <button onClick={handleSave} className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 rounded-md hover:bg-blue-500 transition-colors text-sm">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      <span>Save .txt</span>
+                    </button>
+                  ) : (
+                    <button onClick={handleSaveSRT} className="flex items-center space-x-2 px-3 py-1.5 bg-purple-600 rounded-md hover:bg-purple-500 transition-colors text-sm">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                       </svg>
@@ -417,20 +441,27 @@ const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div className="bg-gray-900 bg-opacity-70 p-4 rounded-lg text-gray-200 font-mono text-sm max-h-96 overflow-y-auto w-full border border-gray-700">
-                {segments.length > 0 ? (
+
+              <div className="bg-gray-900 bg-opacity-70 p-4 rounded-lg text-gray-200 font-mono text-sm max-h-[500px] overflow-y-auto w-full border border-gray-700 shadow-inner">
+                {activeTab === 'txt' ? (
                   <div className="space-y-3">
-                    {segments.map((seg, i) => (
-                      <div key={i} className="flex space-x-3 border-b border-gray-800 pb-2 last:border-0">
-                        <span className="text-blue-400 font-bold min-w-[100px] text-xs">
-                          {formatDuration(seg.start)} - {formatDuration(seg.end)}
-                        </span>
-                        <span className="flex-1">{seg.text}</span>
-                      </div>
-                    ))}
+                    {segments.length > 0 ? (
+                      segments.map((seg, i) => (
+                        <div key={i} className="flex space-x-3 border-b border-gray-800 pb-2 last:border-0">
+                          <span className="text-blue-400 font-bold min-w-[100px] text-xs">
+                            {formatDuration(seg.start)} - {formatDuration(seg.end)}
+                          </span>
+                          <span className="flex-1">{seg.text}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <pre className="whitespace-pre-wrap">{transcript}</pre>
+                    )}
                   </div>
                 ) : (
-                  <pre className="whitespace-pre-wrap">{transcript}</pre>
+                  <pre className="whitespace-pre-wrap text-purple-300">
+                    {generateSRTText()}
+                  </pre>
                 )}
               </div>
             </div>
