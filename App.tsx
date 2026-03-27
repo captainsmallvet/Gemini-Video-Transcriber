@@ -6,6 +6,7 @@ import Spinner from './components/Spinner';
 const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
+  const [segments, setSegments] = useState<{start: number, end: number, text: string}[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -141,8 +142,18 @@ const App: React.FC = () => {
       if (result.startsWith('Error:')) {
           setError(result);
           setTranscript(null);
+          setSegments([]);
       } else {
           setTranscript(result);
+          try {
+            const parsed = JSON.parse(result);
+            if (Array.isArray(parsed)) {
+              setSegments(parsed);
+            }
+          } catch (e) {
+            console.error("Failed to parse transcript as JSON", e);
+            setSegments([]);
+          }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
@@ -155,6 +166,7 @@ const App: React.FC = () => {
   const removeFile = () => {
     setVideoFile(null);
     setTranscript(null);
+    setSegments([]);
     setError(null);
     setVideoDuration(null);
     if(fileInputRef.current) {
@@ -187,14 +199,54 @@ const App: React.FC = () => {
     }
   };
 
+  const formatSRTTimestamp = (seconds: number): string => {
+    const pad = (num: number, size: number) => String(num).padStart(size, '0');
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
+  };
+
+  const handleSaveSRT = () => {
+    if (segments.length > 0 && videoFile) {
+      let srtContent = '';
+      segments.forEach((seg, index) => {
+        srtContent += `${index + 1}\n`;
+        srtContent += `${formatSRTTimestamp(seg.start)} --> ${formatSRTTimestamp(seg.end)}\n`;
+        srtContent += `${seg.text}\n\n`;
+      });
+
+      const baseFilename = videoFile.name.lastIndexOf('.') > -1
+        ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
+        : videoFile.name;
+      const filename = `${baseFilename}.srt`;
+      const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    }
+  };
+
   const handleSave = () => {
     if (transcript && videoFile) {
       const baseFilename = videoFile.name.lastIndexOf('.') > -1
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
         : videoFile.name;
+      
+      let contentToSave = transcript;
+      // If it's JSON, make it readable text for the .txt file
+      if (segments.length > 0) {
+        contentToSave = segments.map(s => `[${formatDuration(s.start)} - ${formatDuration(s.end)}] ${s.text}`).join('\n');
+      }
+
       const durationString = videoDuration ? ` ${formatDuration(videoDuration)}` : '';
       const filename = `audio script with timestamp - ${baseFilename}${durationString}.txt`;
-      const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([contentToSave], { type: 'text/plain;charset=utf-8' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       link.download = filename;
@@ -353,13 +405,34 @@ const App: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    <span>Save</span>
+                    <span>Save .txt</span>
                   </button>
+                  {segments.length > 0 && (
+                    <button onClick={handleSaveSRT} className="flex items-center space-x-2 px-3 py-1.5 bg-blue-700 rounded-md hover:bg-blue-600 transition-colors text-sm">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                      </svg>
+                      <span>Save .srt</span>
+                    </button>
+                  )}
                 </div>
               </div>
-              <pre className="bg-gray-900 bg-opacity-70 p-4 rounded-lg text-gray-200 font-mono text-sm whitespace-pre-wrap max-h-96 overflow-y-auto w-full border border-gray-700">
-                {transcript}
-              </pre>
+              <div className="bg-gray-900 bg-opacity-70 p-4 rounded-lg text-gray-200 font-mono text-sm max-h-96 overflow-y-auto w-full border border-gray-700">
+                {segments.length > 0 ? (
+                  <div className="space-y-3">
+                    {segments.map((seg, i) => (
+                      <div key={i} className="flex space-x-3 border-b border-gray-800 pb-2 last:border-0">
+                        <span className="text-blue-400 font-bold min-w-[100px] text-xs">
+                          {formatDuration(seg.start)} - {formatDuration(seg.end)}
+                        </span>
+                        <span className="flex-1">{seg.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap">{transcript}</pre>
+                )}
+              </div>
             </div>
           )}
         </main>

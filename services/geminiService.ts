@@ -33,11 +33,23 @@ export const transcribeVideo = async (
       },
     };
 
-    let promptText = `Please transcribe the audio from this video. Do not translate or analyze the content. Provide a verbatim transcript in the original language. Format each sentence on a new line, preceded by a timestamp in 'mm:ss' format. For example: '00:05 The quick brown fox...'`;
+    let promptText = `Please transcribe the audio from this video verbatim in its original language. 
+    Do not translate, summarize, or analyze. 
+    Output the transcription as a JSON array of objects. 
+    Each object must have:
+    - "start": start time in seconds (number)
+    - "end": end time in seconds (number)
+    - "text": the transcribed text for that segment.
+    
+    Ensure the timestamps are accurate to the audio. 
+    Example output format:
+    [
+      {"start": 0.5, "end": 2.1, "text": "สวัสดีครับ"},
+      {"start": 2.2, "end": 5.0, "text": "ยินดีต้อนรับเข้าสู่รายการ"}
+    ]`;
 
     if (duration !== null) {
-        const durationString = formatDurationForPrompt(duration);
-        promptText += `\nAt the end of the transcription, add one final line with the exact text: "clip length ${durationString}"`;
+        promptText += `\nNote: The total video duration is ${duration} seconds.`;
     }
 
     const textPart = {
@@ -47,9 +59,12 @@ export const transcribeVideo = async (
     const response = await ai.models.generateContent({
       model: modelName,
       contents: { parts: [textPart, videoPart] },
+      config: {
+        responseMimeType: "application/json"
+      }
     });
 
-    return response.text || "No transcription generated.";
+    return response.text || "[]";
   } catch (error) {
     console.error("Error transcribing video:", error);
     if (error instanceof Error) {
