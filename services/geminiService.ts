@@ -251,7 +251,9 @@ export const transcribeVideo = async (
 
             while (parsed.length === 0 && attempts < maxAttempts) {
                 if (attempts > 0) {
-                    reportProgress(`Chunk ${i + 1} returned empty, retrying (attempt ${attempts + 1})...`);
+                    reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 2 seconds (attempt ${attempts + 1})...`);
+                    // Add a 2-second delay before retrying to handle rate limits / server overload
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
                 try {
                     let currentPrompt = promptText;
@@ -320,6 +322,14 @@ export const transcribeVideo = async (
                         };
                     });
                     allSegments.push(...adjustedSegments);
+            } else {
+                // If it completely failed after all retries, insert a placeholder so the user knows there's a gap
+                reportProgress(`Warning: Chunk ${i + 1} failed completely. Inserting placeholder.`);
+                allSegments.push({
+                    start: i * chunkDuration,
+                    end: (i * chunkDuration) + 5,
+                    text: "[ระบบ AI ขัดข้อง: ไม่สามารถถอดความเสียงในช่วงเวลานี้ได้]"
+                });
             }
         }
 
