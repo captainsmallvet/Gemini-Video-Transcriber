@@ -1,5 +1,5 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { fileToBase64 } from '../utils/fileUtils';
 
 const formatDurationForPrompt = (seconds: number): string => {
@@ -205,20 +205,12 @@ export const transcribeVideo = async (
 
             let promptText = `You are a professional transcriber.
             Task: Transcribe the speech in this audio clip verbatim. 
-            This is a chunk of a larger audio file.
-            
-            OUTPUT FORMAT:
-            You MUST output ONLY a valid JSON array of objects. Do not include any markdown formatting, greetings, or explanations.
-            Each object must have:
-            - "start": start time in seconds (number)
-            - "end": end time in seconds (number)
-            - "text": the transcribed text
             
             RULES:
             1. Transcribe EVERY spoken word. Do not summarize or skip.
-            2. Break text at natural pauses (1-2 sentences per segment).
-            3. Timestamps MUST match the audio exactly. Do not compress timestamps into the first few seconds.
-            4. If there is no speech, output an empty array: [].
+            2. Break text into SHORT segments (maximum 10-15 words). 
+            3. ALWAYS split segments at punctuation marks (commas, periods, question marks) or natural pauses. Do not output long paragraphs.
+            4. Timestamps MUST match the audio exactly.
             `;
 
             const textPart = { text: promptText };
@@ -227,7 +219,19 @@ export const transcribeVideo = async (
               model: modelName,
               contents: { parts: [textPart, audioPart] },
               config: {
-                responseMimeType: "application/json"
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      start: { type: Type.NUMBER, description: "Start time in seconds" },
+                      end: { type: Type.NUMBER, description: "End time in seconds" },
+                      text: { type: Type.STRING, description: "Transcribed text. Max 10-15 words. Break at commas/periods." }
+                    },
+                    required: ["start", "end", "text"]
+                  }
+                }
               }
             });
 
@@ -292,18 +296,11 @@ export const transcribeVideo = async (
     let promptText = `You are a professional transcriber.
     Task: Transcribe the speech in this video verbatim. 
     
-    OUTPUT FORMAT:
-    You MUST output ONLY a valid JSON array of objects. Do not include any markdown formatting, greetings, or explanations.
-    Each object must have:
-    - "start": start time in seconds (number)
-    - "end": end time in seconds (number)
-    - "text": the transcribed text
-    
     RULES:
     1. Transcribe EVERY spoken word. Do not summarize or skip.
-    2. Break text at natural pauses (1-2 sentences per segment).
-    3. Timestamps MUST match the audio exactly. Do not compress timestamps into the first few seconds.
-    4. If there is no speech, output an empty array: [].
+    2. Break text into SHORT segments (maximum 10-15 words). 
+    3. ALWAYS split segments at punctuation marks (commas, periods, question marks) or natural pauses. Do not output long paragraphs.
+    4. Timestamps MUST match the audio exactly.
     `;
 
     const textPart = {
@@ -315,7 +312,19 @@ export const transcribeVideo = async (
       model: modelName,
       contents: { parts: [textPart, videoPart] },
       config: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              start: { type: Type.NUMBER, description: "Start time in seconds" },
+              end: { type: Type.NUMBER, description: "End time in seconds" },
+              text: { type: Type.STRING, description: "Transcribed text. Max 10-15 words. Break at commas/periods." }
+            },
+            required: ["start", "end", "text"]
+          }
+        }
       }
     });
 
