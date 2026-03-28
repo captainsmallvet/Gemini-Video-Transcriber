@@ -38,15 +38,19 @@ const cleanSegments = (segments: any[]) => {
         const current = segments[j];
         const next = segments[j + 1];
         
-        // 1. Fix overlaps with the next segment
-        if (next && current.end > next.start) {
-            // If they overlap, cut the current one short, just before the next starts
-            current.end = Math.max(current.start + 0.1, next.start - 0.001);
+        // Automatically set the end time to just before the next segment starts
+        if (next) {
+            current.end = next.start - 0.001;
+        } else {
+            // For the very last segment, give it a default duration if it doesn't have a valid one
+            if (!current.end || current.end <= current.start) {
+                current.end = current.start + 5; // Default 5 seconds for the last segment
+            }
         }
         
-        // 2. Enforce maximum duration (e.g., 7 seconds max to be safe)
-        if (current.end - current.start > 7) {
-            current.end = current.start + 7;
+        // Safety check: ensure end is always strictly greater than start
+        if (current.end <= current.start) {
+            current.end = current.start + 0.1;
         }
     }
     return segments;
@@ -194,34 +198,31 @@ export const transcribeVideo = async (
             Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the clip.
             Output the transcription as a JSON array of objects. 
             
-            SUBTITLE LENGTH RULES:
-            1. Break the text into SHORT, readable subtitle segments.
-            2. A single subtitle segment MUST NOT exceed 1 line of text (about 40-50 characters).
-            3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
-            4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
-            5. DO NOT combine long paragraphs into a single segment.
+            SUBTITLE LENGTH RULES (CRITICAL):
+            1. Break the text into VERY SHORT, readable subtitle segments.
+            2. ABSOLUTE MAXIMUM of 10 words per segment. If a sentence is longer, you MUST split it at natural pauses.
+            3. A single subtitle segment MUST NOT exceed 1 line of text.
+            4. DO NOT combine long paragraphs into a single segment.
             
             TIMING ACCURACY RULES (CRITICAL):
             1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
-            2. If the speaker speaks fast, the timestamps must be close together. If they speak slowly, the timestamps must reflect that. DO NOT evenly distribute timestamps across the audio.
-            3. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s).
-            4. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
+            2. Only provide the "start" time for each segment. The system will automatically calculate the end time.
+            3. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
             
             Each object must have:
             - "start": start time in seconds (number)
-            - "end": end time in seconds (number)
             - "text": the transcribed text for that segment.
             
             Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
             Example output format:
             [
-              {"start": 0.5, "end": 3.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-              {"start": 3.3, "end": 6.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+              {"start": 0.5, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+              {"start": 3.3, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
             ]`;
 
             promptText += `\n\nCRITICAL TIMING RULES:
             1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-            2. RELY ON AUDIO TIMELINE: Do not calculate, interpolate, or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
+            2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start time directly from the audio stream.`;
 
             const textPart = { text: promptText };
 
@@ -251,7 +252,7 @@ export const transcribeVideo = async (
 
                     const adjustedSegments = filteredParsed.map(seg => {
                         const s = parseTime(seg.start);
-                        const e = parseTime(seg.end);
+                        const e = seg.end !== undefined ? parseTime(seg.end) : s + 2; // Fallback end if AI provides it, otherwise temporary
                         return {
                             // Local time 0 in this chunk corresponds to global time `timeOffset`.
                             // We DO NOT subtract OVERLAP_SEC here, because the overlap is at the END of the previous chunk,
@@ -288,34 +289,31 @@ export const transcribeVideo = async (
     Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the video.
     Output the transcription as a JSON array of objects. 
     
-    SUBTITLE LENGTH RULES:
-    1. Break the text into SHORT, readable subtitle segments.
-    2. A single subtitle segment MUST NOT exceed 1 line of text (about 40-50 characters).
-    3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
-    4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
-    5. DO NOT combine long paragraphs into a single segment.
+    SUBTITLE LENGTH RULES (CRITICAL):
+    1. Break the text into VERY SHORT, readable subtitle segments.
+    2. ABSOLUTE MAXIMUM of 10 words per segment. If a sentence is longer, you MUST split it at natural pauses.
+    3. A single subtitle segment MUST NOT exceed 1 line of text.
+    4. DO NOT combine long paragraphs into a single segment.
     
     TIMING ACCURACY RULES (CRITICAL):
     1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
-    2. If the speaker speaks fast, the timestamps must be close together. If they speak slowly, the timestamps must reflect that. DO NOT evenly distribute timestamps across the audio.
-    3. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s).
-    4. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
+    2. Only provide the "start" time for each segment. The system will automatically calculate the end time.
+    3. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
     
     Each object must have:
     - "start": start time in seconds (number)
-    - "end": end time in seconds (number)
     - "text": the transcribed text for that segment.
     
     Ensure the timestamps are strictly accurate to the audio. Do not skip any parts of the video.
     Example output format:
     [
-      {"start": 0.5, "end": 3.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-      {"start": 3.3, "end": 6.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+      {"start": 0.5, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+      {"start": 3.3, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
     ]`;
 
     promptText += `\n\nCRITICAL TIMING RULES:
     1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-    2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
+    2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start time directly from the audio stream.`;
 
     const textPart = {
       text: promptText,
@@ -336,7 +334,7 @@ export const transcribeVideo = async (
         if (Array.isArray(parsed)) {
             const normalizedParsed = parsed.map(seg => ({
                 start: parseTime(seg.start),
-                end: parseTime(seg.end),
+                end: seg.end !== undefined ? parseTime(seg.end) : parseTime(seg.start) + 2, // Fallback end
                 text: seg.text
             }));
             const cleanedSegments = cleanSegments(normalizedParsed);
