@@ -180,7 +180,7 @@ export const transcribeVideo = async (
 
             promptText += `\n\nCRITICAL TIMING RULES:
             1. The absolute total duration of this clip is approximately ${actualChunkDuration} seconds.
-            2. NO "start" or "end" timestamp can be greater than ${actualChunkDuration + 5}.
+            2. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
             3. Do not stretch, scale, or hallucinate timestamps. Map the text strictly to the actual audio timeline.`;
 
             const textPart = { text: promptText };
@@ -269,9 +269,8 @@ export const transcribeVideo = async (
     if (duration !== null) {
         promptText += `\n\nCRITICAL TIMING RULES:
         1. The absolute total duration of this video is exactly ${duration} seconds (${Math.floor(duration / 60)} minutes and ${Math.round(duration % 60)} seconds).
-        2. NO "start" or "end" timestamp can be greater than ${duration}.
-        3. Do not stretch, scale, or hallucinate timestamps. Map the text strictly to the actual audio timeline.
-        4. The final segment's "end" time MUST be less than or equal to ${duration}.`;
+        2. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
+        3. Do not stretch, scale, or hallucinate timestamps. Map the text strictly to the actual audio timeline.`;
     }
 
     const textPart = {
