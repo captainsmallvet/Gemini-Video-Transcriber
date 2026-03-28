@@ -63,7 +63,7 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-    const CHUNK_DURATION_SEC = 2 * 60; // 2 minutes core chunk
+    const CHUNK_DURATION_SEC = 1 * 60; // 1 minute core chunk to prevent AI timestamp interpolation drift
     const OVERLAP_SEC = 5; // 5 seconds overlap
     const sampleRate = audioBuffer.sampleRate;
     const totalLength = audioBuffer.length;
@@ -135,7 +135,7 @@ export const transcribeVideo = async (
 
     if (useChunking && chunks.length > 0) {
         let allSegments: any[] = [];
-        const chunkDuration = 2 * 60; // 2 minutes
+        const chunkDuration = 1 * 60; // 1 minute
 
         for (let i = 0; i < chunks.length; i++) {
             reportProgress(`Transcribing part ${i + 1} of ${chunks.length}...`);
@@ -163,10 +163,11 @@ export const transcribeVideo = async (
             4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
             5. DO NOT combine long paragraphs into a single segment.
             
-            TIMING ACCURACY RULES:
-            1. Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
-            2. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s). DO NOT hallucinate large gaps in time (like jumping 10 or 40 seconds) if there is no actual silence.
-            3. The timestamps must progress logically and linearly.
+            TIMING ACCURACY RULES (CRITICAL):
+            1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
+            2. If the speaker speaks fast, the timestamps must be close together. If they speak slowly, the timestamps must reflect that. DO NOT evenly distribute timestamps across the audio.
+            3. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s).
+            4. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
             
             Each object must have:
             - "start": start time in seconds (number)
@@ -182,7 +183,7 @@ export const transcribeVideo = async (
 
             promptText += `\n\nCRITICAL TIMING RULES:
             1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-            2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
+            2. RELY ON AUDIO TIMELINE: Do not calculate, interpolate, or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
 
             const textPart = { text: promptText };
 
@@ -211,10 +212,11 @@ export const transcribeVideo = async (
                         : parsed;
 
                     const adjustedSegments = filteredParsed.map(seg => ({
-                        // For chunks after the first, we subtract the overlap from their local time
-                        // because their local time 0 is actually (timeOffset - OVERLAP_SEC) in global time.
-                        start: seg.start + timeOffset - (i > 0 ? OVERLAP_SEC : 0),
-                        end: seg.end + timeOffset - (i > 0 ? OVERLAP_SEC : 0),
+                        // Local time 0 in this chunk corresponds to global time `timeOffset`.
+                        // We DO NOT subtract OVERLAP_SEC here, because the overlap is at the END of the previous chunk,
+                        // meaning this chunk's true start time is exactly `timeOffset`.
+                        start: seg.start + timeOffset,
+                        end: seg.end + timeOffset,
                         text: seg.text
                     }));
                     allSegments.push(...adjustedSegments);
@@ -250,10 +252,11 @@ export const transcribeVideo = async (
     4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
     5. DO NOT combine long paragraphs into a single segment.
     
-    TIMING ACCURACY RULES:
-    1. Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
-    2. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s). DO NOT hallucinate large gaps in time (like jumping 10 or 40 seconds) if there is no actual silence.
-    3. The timestamps must progress logically and linearly.
+    TIMING ACCURACY RULES (CRITICAL):
+    1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
+    2. If the speaker speaks fast, the timestamps must be close together. If they speak slowly, the timestamps must reflect that. DO NOT evenly distribute timestamps across the audio.
+    3. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s).
+    4. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
     
     Each object must have:
     - "start": start time in seconds (number)
