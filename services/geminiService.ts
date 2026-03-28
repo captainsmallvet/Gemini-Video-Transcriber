@@ -14,6 +14,22 @@ const formatDurationForPrompt = (seconds: number): string => {
     return `${formattedMinutes}:${formattedSeconds}`;
 };
 
+const parseTime = (time: any): number => {
+    if (typeof time === 'number') return time;
+    if (typeof time === 'string') {
+        // Handle MM:SS or HH:MM:SS formats if AI hallucinates them
+        if (time.includes(':')) {
+            const parts = time.split(':').map(Number);
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        }
+        // Remove any non-numeric characters except dot
+        const cleaned = time.replace(/[^0-9.]/g, '');
+        return Number(cleaned) || 0;
+    }
+    return 0;
+};
+
 const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
@@ -233,14 +249,18 @@ export const transcribeVideo = async (
                         ? parsed.filter(seg => seg.start >= OVERLAP_SEC)
                         : parsed;
 
-                    const adjustedSegments = filteredParsed.map(seg => ({
-                        // Local time 0 in this chunk corresponds to global time `timeOffset`.
-                        // We DO NOT subtract OVERLAP_SEC here, because the overlap is at the END of the previous chunk,
-                        // meaning this chunk's true start time is exactly `timeOffset`.
-                        start: seg.start + timeOffset,
-                        end: seg.end + timeOffset,
-                        text: seg.text
-                    }));
+                    const adjustedSegments = filteredParsed.map(seg => {
+                        const s = parseTime(seg.start);
+                        const e = parseTime(seg.end);
+                        return {
+                            // Local time 0 in this chunk corresponds to global time `timeOffset`.
+                            // We DO NOT subtract OVERLAP_SEC here, because the overlap is at the END of the previous chunk,
+                            // meaning this chunk's true start time is exactly `timeOffset`.
+                            start: s + timeOffset,
+                            end: e + timeOffset,
+                            text: seg.text
+                        };
+                    });
                     allSegments.push(...adjustedSegments);
                 }
             } catch (e) {
@@ -314,7 +334,12 @@ export const transcribeVideo = async (
     try {
         const parsed = JSON.parse(resultText);
         if (Array.isArray(parsed)) {
-            const cleanedSegments = cleanSegments(parsed);
+            const normalizedParsed = parsed.map(seg => ({
+                start: parseTime(seg.start),
+                end: parseTime(seg.end),
+                text: seg.text
+            }));
+            const cleanedSegments = cleanSegments(normalizedParsed);
             return JSON.stringify(cleanedSegments);
         }
     } catch (e) {
