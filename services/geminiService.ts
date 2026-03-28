@@ -197,40 +197,29 @@ export const transcribeVideo = async (
               },
             };
 
+            const chunkDurationSec = 60;
+            const overlapSec = 5;
             const isLastChunk = i === chunks.length - 1;
-            const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDuration) : chunkDuration;
+            // The actual duration of the audio blob includes the overlap (except for the last chunk)
+            const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
-            let promptText = `You are a professional subtitle timer and transcriber.
-            Task: Transcribe the audio from this clip verbatim and provide highly accurate timestamps.
-            Audio Duration: ${actualChunkDuration.toFixed(2)} seconds.
+            let promptText = `You are a professional transcriber.
+            Task: Transcribe the speech in this audio clip verbatim. 
+            This is a chunk of a larger audio file.
             
             OUTPUT FORMAT:
-            Output a JSON array of objects. Each object must have:
+            You MUST output ONLY a valid JSON array of objects. Do not include any markdown formatting, greetings, or explanations.
+            Each object must have:
             - "start": start time in seconds (number)
             - "end": end time in seconds (number)
             - "text": the transcribed text
             
-            CRITICAL TIMING RULES (PREVENTING COMPRESSION BUG):
-            1. DO NOT compress all timestamps into the first few seconds (e.g., 0.1, 0.2, 0.3). This is a common error and is STRICTLY FORBIDDEN.
-            2. You MUST listen to the audio and place the "start" and "end" timestamps exactly where the speech occurs in the ${actualChunkDuration.toFixed(2)}-second timeline.
-            3. If the speaker is silent for the first 10 seconds, the first "start" timestamp MUST be 10.0 or later.
-            4. Transcribe strictly in CHRONOLOGICAL ORDER. Do not mix up the order of sentences.
-            
-            SUBTITLE LENGTH & SPLITTING RULES:
-            1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
-            2. Each subtitle segment should contain 1 to 2 complete sentences (maximum 3 lines of text).
-            3. DO NOT SUMMARIZE. You must transcribe every single word verbatim.
-            4. IF THERE IS NO SPEECH (e.g., silence, music only), output an empty array: []. DO NOT hallucinate speech.
-            
-            Example of CORRECT spreading of timestamps:
-            [
-              {"start": 12.5, "end": 15.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-              {"start": 28.3, "end": 31.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
-            ]`;
-
-            promptText += `\n\nFINAL WARNING: 
-            - COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second.
-            - RELY ON AUDIO TIMELINE: Extract the exact start and end times directly from the audio stream. Do not guess.`;
+            RULES:
+            1. Transcribe EVERY spoken word. Do not summarize or skip.
+            2. Break text at natural pauses (1-2 sentences per segment).
+            3. Timestamps MUST match the audio exactly. Do not compress timestamps into the first few seconds.
+            4. If there is no speech, output an empty array: [].
+            `;
 
             const textPart = { text: promptText };
 
@@ -245,7 +234,9 @@ export const transcribeVideo = async (
             const resultText = response.text || "[]";
             try {
                 let jsonString = resultText;
-                const jsonMatch = resultText.match(/\[[\s\S]*\]/);
+                // Remove markdown code blocks if present
+                jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                 if (jsonMatch) {
                     jsonString = jsonMatch[0];
                 }
@@ -298,37 +289,22 @@ export const transcribeVideo = async (
       },
     };
 
-    let promptText = `You are a professional subtitle timer and transcriber.
-    Task: Transcribe the audio from this video verbatim and provide highly accurate timestamps.
-    ${duration ? `Video Duration: ${duration.toFixed(2)} seconds.` : ''}
+    let promptText = `You are a professional transcriber.
+    Task: Transcribe the speech in this video verbatim. 
     
     OUTPUT FORMAT:
-    Output a JSON array of objects. Each object must have:
+    You MUST output ONLY a valid JSON array of objects. Do not include any markdown formatting, greetings, or explanations.
+    Each object must have:
     - "start": start time in seconds (number)
     - "end": end time in seconds (number)
     - "text": the transcribed text
     
-    CRITICAL TIMING RULES (PREVENTING COMPRESSION BUG):
-    1. DO NOT compress all timestamps into the first few seconds (e.g., 0.1, 0.2, 0.3). This is a common error and is STRICTLY FORBIDDEN.
-    2. You MUST listen to the audio and place the "start" and "end" timestamps exactly where the speech occurs in the timeline.
-    3. If the speaker is silent for the first 10 seconds, the first "start" timestamp MUST be 10.0 or later.
-    4. Transcribe strictly in CHRONOLOGICAL ORDER. Do not mix up the order of sentences.
-    
-    SUBTITLE LENGTH & SPLITTING RULES:
-    1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
-    2. Each subtitle segment should contain 1 to 2 complete sentences (maximum 3 lines of text).
-    3. DO NOT SUMMARIZE. You must transcribe every single word verbatim.
-    4. IF THERE IS NO SPEECH (e.g., silence, music only), output an empty array: []. DO NOT hallucinate speech.
-    
-    Example of CORRECT spreading of timestamps:
-    [
-      {"start": 12.5, "end": 15.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-      {"start": 28.3, "end": 31.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
-    ]`;
-
-    promptText += `\n\nFINAL WARNING: 
-    - COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second.
-    - RELY ON AUDIO TIMELINE: Extract the exact start and end times directly from the audio stream. Do not guess.`;
+    RULES:
+    1. Transcribe EVERY spoken word. Do not summarize or skip.
+    2. Break text at natural pauses (1-2 sentences per segment).
+    3. Timestamps MUST match the audio exactly. Do not compress timestamps into the first few seconds.
+    4. If there is no speech, output an empty array: [].
+    `;
 
     const textPart = {
       text: promptText,
@@ -346,7 +322,9 @@ export const transcribeVideo = async (
     const resultText = response.text || "[]";
     try {
         let jsonString = resultText;
-        const jsonMatch = resultText.match(/\[[\s\S]*\]/);
+        // Remove markdown code blocks if present
+        jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
             jsonString = jsonMatch[0];
         }
