@@ -61,20 +61,24 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-    const CHUNK_DURATION_SEC = 5 * 60; // 5 minutes per chunk
+    const CHUNK_DURATION_SEC = 5 * 60; // 5 minutes core chunk
+    const OVERLAP_SEC = 5; // 5 seconds overlap
     const sampleRate = audioBuffer.sampleRate;
     const totalLength = audioBuffer.length;
     const chunkLength = CHUNK_DURATION_SEC * sampleRate;
+    const overlapLength = OVERLAP_SEC * sampleRate;
     const chunks: Blob[] = [];
 
     // Mixdown to mono (use channel 0)
     const channelData = audioBuffer.getChannelData(0); 
     
+    // Calculate total chunks based on core duration
     const totalChunks = Math.ceil(totalLength / chunkLength);
     for (let i = 0; i < totalChunks; i++) {
         onProgress(`Creating audio chunk ${i + 1} of ${totalChunks}...`);
         const start = i * chunkLength;
-        const end = Math.min(start + chunkLength, totalLength);
+        // Add overlap to the end of the chunk (except the last one)
+        const end = Math.min(start + chunkLength + overlapLength, totalLength);
         const slice = channelData.slice(start, end);
         const wavBlob = encodeWAV(slice, sampleRate);
         chunks.push(wavBlob);
@@ -149,7 +153,14 @@ export const transcribeVideo = async (
             let promptText = `Please transcribe the audio from this audio clip verbatim in its original language. 
             Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the clip.
             Output the transcription as a JSON array of objects. 
-            Break the transcription into natural sentences or logical phrases.
+            
+            SUBTITLE LENGTH RULES:
+            1. Break the text into SHORT, readable subtitle segments.
+            2. A single subtitle segment MUST NOT exceed 2 lines of text (about 40-50 characters per line).
+            3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
+            4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
+            5. DO NOT combine long paragraphs into a single segment.
+            
             Each object must have:
             - "start": start time in seconds (number)
             - "end": end time in seconds (number)
@@ -158,8 +169,8 @@ export const transcribeVideo = async (
             Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
             Example output format:
             [
-              {"start": 0.5, "end": 5.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-              {"start": 5.3, "end": 10.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+              {"start": 0.5, "end": 3.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+              {"start": 3.3, "end": 6.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
             ]`;
 
             promptText += `\n\nCRITICAL TIMING RULES:
@@ -182,9 +193,22 @@ export const transcribeVideo = async (
                 const parsed = JSON.parse(resultText);
                 if (Array.isArray(parsed)) {
                     const timeOffset = i * chunkDuration;
-                    const adjustedSegments = parsed.map(seg => ({
-                        start: seg.start + timeOffset,
-                        end: seg.end + timeOffset,
+                    
+                    // Filter out overlap from previous chunk
+                    // If this is not the first chunk, ignore items that start before the overlap period ends
+                    // The overlap is OVERLAP_SEC (5 seconds) at the end of the previous chunk.
+                    // So for chunk i (i > 0), the first 5 seconds of its audio are actually the overlap from chunk i-1.
+                    // We only want to keep items that start AFTER the overlap period in this chunk's local time.
+                    const OVERLAP_SEC = 5;
+                    const filteredParsed = i > 0 
+                        ? parsed.filter(seg => seg.start >= OVERLAP_SEC)
+                        : parsed;
+
+                    const adjustedSegments = filteredParsed.map(seg => ({
+                        // For chunks after the first, we subtract the overlap from their local time
+                        // because their local time 0 is actually (timeOffset - OVERLAP_SEC) in global time.
+                        start: seg.start + timeOffset - (i > 0 ? OVERLAP_SEC : 0),
+                        end: seg.end + timeOffset - (i > 0 ? OVERLAP_SEC : 0),
                         text: seg.text
                     }));
                     allSegments.push(...adjustedSegments);
@@ -212,7 +236,14 @@ export const transcribeVideo = async (
     let promptText = `Please transcribe the audio from this video verbatim in its original language. 
     Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the video.
     Output the transcription as a JSON array of objects. 
-    Break the transcription into natural sentences or logical phrases.
+    
+    SUBTITLE LENGTH RULES:
+    1. Break the text into SHORT, readable subtitle segments.
+    2. A single subtitle segment MUST NOT exceed 2 lines of text (about 40-50 characters per line).
+    3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
+    4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
+    5. DO NOT combine long paragraphs into a single segment.
+    
     Each object must have:
     - "start": start time in seconds (number)
     - "end": end time in seconds (number)
@@ -221,8 +252,8 @@ export const transcribeVideo = async (
     Ensure the timestamps are strictly accurate to the audio. Do not skip any parts of the video.
     Example output format:
     [
-      {"start": 0.5, "end": 5.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-      {"start": 5.3, "end": 10.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+      {"start": 0.5, "end": 3.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+      {"start": 3.3, "end": 6.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
     ]`;
 
     if (duration !== null) {
