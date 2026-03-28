@@ -200,35 +200,37 @@ export const transcribeVideo = async (
             const isLastChunk = i === chunks.length - 1;
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDuration) : chunkDuration;
 
-            let promptText = `Please transcribe the audio from this audio clip verbatim in its original language. 
-            Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the clip.
-            Output the transcription as a JSON array of objects. 
+            let promptText = `You are a professional subtitle timer and transcriber.
+            Task: Transcribe the audio from this clip verbatim and provide highly accurate timestamps.
+            Audio Duration: ${actualChunkDuration.toFixed(2)} seconds.
             
-            SUBTITLE LENGTH RULES (CRITICAL):
-            1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
-            2. DO NOT cut sentences in the middle just to make them short. It is better to keep a complete thought together.
-            3. A single subtitle segment can be 1 to 3 lines long.
-            4. Only split a single sentence if it is extremely long (would take more than 3 lines).
-            
-            TIMING ACCURACY RULES (CRITICAL):
-            1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
-            2. Only provide the "start" time for each segment. The system will automatically calculate the end time.
-            3. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
-            
-            Each object must have:
+            OUTPUT FORMAT:
+            Output a JSON array of objects. Each object must have:
             - "start": start time in seconds (number)
-            - "text": the transcribed text for that segment.
+            - "end": end time in seconds (number)
+            - "text": the transcribed text
             
-            Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
-            Example output format:
+            CRITICAL TIMING RULES (PREVENTING COMPRESSION BUG):
+            1. DO NOT compress all timestamps into the first few seconds (e.g., 0.1, 0.2, 0.3). This is a common error and is STRICTLY FORBIDDEN.
+            2. You MUST listen to the audio and place the "start" and "end" timestamps exactly where the speech occurs in the ${actualChunkDuration.toFixed(2)}-second timeline.
+            3. If the speaker is silent for the first 10 seconds, the first "start" timestamp MUST be 10.0 or later.
+            4. Transcribe strictly in CHRONOLOGICAL ORDER. Do not mix up the order of sentences.
+            
+            SUBTITLE LENGTH & SPLITTING RULES:
+            1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
+            2. Each subtitle segment should contain 1 to 2 complete sentences (maximum 3 lines of text).
+            3. DO NOT SUMMARIZE. You must transcribe every single word verbatim.
+            4. IF THERE IS NO SPEECH (e.g., silence, music only), output an empty array: []. DO NOT hallucinate speech.
+            
+            Example of CORRECT spreading of timestamps:
             [
-              {"start": 0.5, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-              {"start": 3.3, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+              {"start": 12.5, "end": 15.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+              {"start": 28.3, "end": 31.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
             ]`;
 
-            promptText += `\n\nCRITICAL TIMING RULES:
-            1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-            2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start time directly from the audio stream.`;
+            promptText += `\n\nFINAL WARNING: 
+            - COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second.
+            - RELY ON AUDIO TIMELINE: Extract the exact start and end times directly from the audio stream. Do not guess.`;
 
             const textPart = { text: promptText };
 
@@ -296,35 +298,37 @@ export const transcribeVideo = async (
       },
     };
 
-    let promptText = `Please transcribe the audio from this video verbatim in its original language. 
-    Do not translate, summarize, or analyze. You must transcribe EVERYTHING from the beginning to the very end of the video.
-    Output the transcription as a JSON array of objects. 
+    let promptText = `You are a professional subtitle timer and transcriber.
+    Task: Transcribe the audio from this video verbatim and provide highly accurate timestamps.
+    ${duration ? `Video Duration: ${duration.toFixed(2)} seconds.` : ''}
     
-    SUBTITLE LENGTH RULES (CRITICAL):
-    1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
-    2. DO NOT cut sentences in the middle just to make them short. It is better to keep a complete thought together.
-    3. A single subtitle segment can be 1 to 3 lines long.
-    4. Only split a single sentence if it is extremely long (would take more than 3 lines).
-    
-    TIMING ACCURACY RULES (CRITICAL):
-    1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
-    2. Only provide the "start" time for each segment. The system will automatically calculate the end time.
-    3. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early.
-    
-    Each object must have:
+    OUTPUT FORMAT:
+    Output a JSON array of objects. Each object must have:
     - "start": start time in seconds (number)
-    - "text": the transcribed text for that segment.
+    - "end": end time in seconds (number)
+    - "text": the transcribed text
     
-    Ensure the timestamps are strictly accurate to the audio. Do not skip any parts of the video.
-    Example output format:
+    CRITICAL TIMING RULES (PREVENTING COMPRESSION BUG):
+    1. DO NOT compress all timestamps into the first few seconds (e.g., 0.1, 0.2, 0.3). This is a common error and is STRICTLY FORBIDDEN.
+    2. You MUST listen to the audio and place the "start" and "end" timestamps exactly where the speech occurs in the timeline.
+    3. If the speaker is silent for the first 10 seconds, the first "start" timestamp MUST be 10.0 or later.
+    4. Transcribe strictly in CHRONOLOGICAL ORDER. Do not mix up the order of sentences.
+    
+    SUBTITLE LENGTH & SPLITTING RULES:
+    1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
+    2. Each subtitle segment should contain 1 to 2 complete sentences (maximum 3 lines of text).
+    3. DO NOT SUMMARIZE. You must transcribe every single word verbatim.
+    4. IF THERE IS NO SPEECH (e.g., silence, music only), output an empty array: []. DO NOT hallucinate speech.
+    
+    Example of CORRECT spreading of timestamps:
     [
-      {"start": 0.5, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
-      {"start": 3.3, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
+      {"start": 12.5, "end": 15.2, "text": "สวัสดีครับทุกท่าน วันนี้เราจะมาพูดถึงเรื่อง..."},
+      {"start": 28.3, "end": 31.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
     ]`;
 
-    promptText += `\n\nCRITICAL TIMING RULES:
-    1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-    2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start time directly from the audio stream.`;
+    promptText += `\n\nFINAL WARNING: 
+    - COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second.
+    - RELY ON AUDIO TIMELINE: Extract the exact start and end times directly from the audio stream. Do not guess.`;
 
     const textPart = {
       text: promptText,
