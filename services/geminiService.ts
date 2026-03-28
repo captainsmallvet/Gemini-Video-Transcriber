@@ -156,7 +156,7 @@ export const transcribeVideo = async (
             
             SUBTITLE LENGTH RULES:
             1. Break the text into SHORT, readable subtitle segments.
-            2. A single subtitle segment MUST NOT exceed 2 lines of text (about 40-50 characters per line).
+            2. A single subtitle segment MUST NOT exceed 1 line of text (about 40-50 characters).
             3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
             4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
             5. DO NOT combine long paragraphs into a single segment.
@@ -239,7 +239,7 @@ export const transcribeVideo = async (
     
     SUBTITLE LENGTH RULES:
     1. Break the text into SHORT, readable subtitle segments.
-    2. A single subtitle segment MUST NOT exceed 2 lines of text (about 40-50 characters per line).
+    2. A single subtitle segment MUST NOT exceed 1 line of text (about 40-50 characters).
     3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
     4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
     5. DO NOT combine long paragraphs into a single segment.
