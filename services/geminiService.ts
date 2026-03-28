@@ -65,14 +65,13 @@ const cleanSegments = (segments: any[]) => {
         const current = segments[j];
         const next = segments[j + 1];
         
-        // If AI didn't provide a valid end time, estimate it
-        if (!current.end || current.end <= current.start) {
-            current.end = current.start + 3; // Default 3 seconds
-        }
-        
-        // Prevent overlapping with the next segment
-        if (next && current.end > next.start) {
+        // Extend current.end to the start of the next segment to avoid gaps,
+        // as requested by the user, but respect the maximum duration rule.
+        if (next) {
+            // Extend to just before the next segment starts
             current.end = next.start - 0.001;
+        } else if (!current.end || current.end <= current.start) {
+            current.end = current.start + 3; // Default 3 seconds for the last segment
         }
         
         // Safety check 1: ensure end is always strictly greater than start
@@ -241,12 +240,13 @@ export const transcribeVideo = async (
             Audio duration: ~${Math.round(actualChunkDuration)} seconds.
             
             CRITICAL RULES:
-            1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Cover the full ${Math.round(actualChunkDuration)} seconds. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
-            2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-            3. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
-            4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
-            5. Timestamps MUST match the audio exactly. When you split a sentence at a comma, you MUST check the EXACT time the word before the comma ends, and the exact time the word after the comma begins. DO NOT estimate or interpolate timestamps.
-            6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+            1. TRANSCRIBE THE ENTIRE AUDIO CHRONOLOGICALLY. Do not stop early. Cover the full ${Math.round(actualChunkDuration)} seconds.
+            2. DO NOT add introductory summaries, titles, or pull quotes at the beginning. Transcribe strictly what is spoken, when it is spoken.
+            3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
+            4. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
+            5. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps. Text spoken at the end of the audio must have a timestamp at the end of the audio.
+            7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
 
             const textPart = { text: promptText };
@@ -361,12 +361,13 @@ export const transcribeVideo = async (
     Task: Transcribe the speech in this video verbatim from beginning to end.
     
     CRITICAL RULES:
-    1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
-    2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-    3. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
-    4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
-    5. Timestamps MUST match the audio exactly. When you split a sentence at a comma, you MUST check the EXACT time the word before the comma ends, and the exact time the word after the comma begins. DO NOT estimate or interpolate timestamps.
-    6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+    1. TRANSCRIBE THE ENTIRE AUDIO CHRONOLOGICALLY. Do not stop early.
+    2. DO NOT add introductory summaries, titles, or pull quotes at the beginning. Transcribe strictly what is spoken, when it is spoken.
+    3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
+    4. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
+    5. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+    6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps.
+    7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
     `;
 
     const textPart = {

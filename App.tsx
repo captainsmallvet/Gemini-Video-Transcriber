@@ -364,7 +364,7 @@ const App: React.FC = () => {
             Gemini Video Transcriber
           </h1>
           <p className="mt-4 text-lg text-gray-300">
-            Upload a video to get a timestamped transcript using <div className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</div>.
+            Upload a video to get a timestamped transcript using <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>.
           </p>
         </header>
 
