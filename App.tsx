@@ -14,6 +14,8 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [copySuccess, setCopySuccess] = useState<string>('');
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
+  const [retrySummary, setRetrySummary] = useState<{chunk: number, attempts: number, success: boolean}[]>([]);
+  const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
@@ -140,16 +142,39 @@ const App: React.FC = () => {
     setError(null);
     setTranscript(null);
     setCopySuccess('');
+    setRetrySummary([]);
+    setShowSummaryModal(false);
 
     try {
       const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       });
-      if (result.startsWith('Error:')) {
+      
+      if (typeof result === 'string' && result.startsWith('Error:')) {
           setError(result);
           setTranscript(null);
           setSegments([]);
+      } else if (typeof result !== 'string') {
+          setTranscript(result.data);
+          
+          // Check if there were any retries or failures to show the summary modal
+          const hasRetriesOrFailures = result.retryLog.some(log => log.attempts > 1 || !log.success);
+          if (hasRetriesOrFailures) {
+              setRetrySummary(result.retryLog);
+              setShowSummaryModal(true);
+          }
+
+          try {
+            const parsed = JSON.parse(result.data);
+            if (Array.isArray(parsed)) {
+              setSegments(parsed);
+            }
+          } catch (e) {
+            console.error("Failed to parse transcript as JSON", e);
+            setSegments([]);
+          }
       } else {
+          // Fallback if it somehow returned a string that is not an error
           setTranscript(result);
           try {
             const parsed = JSON.parse(result);
@@ -405,7 +430,9 @@ const App: React.FC = () => {
           {isLoading && (
             <div className="flex flex-col items-center">
               <Spinner />
-              <p className="text-blue-400 mt-4 text-sm font-mono animate-pulse">{progressMessage}</p>
+              <p className={`mt-4 text-sm font-mono animate-pulse text-center ${progressMessage.toLowerCase().includes('retry') || progressMessage.toLowerCase().includes('warning') ? 'text-red-500 font-bold' : 'text-blue-400'}`}>
+                {progressMessage}
+              </p>
             </div>
           )}
 
@@ -478,6 +505,59 @@ const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* Summary Modal */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Transcription Summary
+              </h3>
+              <button 
+                onClick={() => setShowSummaryModal(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <p className="text-gray-300 mb-4 text-sm">
+                Some parts of the video required multiple attempts to process or encountered issues. Please review the affected segments below:
+              </p>
+              <div className="space-y-3">
+                {retrySummary.filter(log => log.attempts > 1 || !log.success).map((log, idx) => (
+                  <div key={idx} className={`p-4 rounded-lg border ${log.success ? 'bg-yellow-900 bg-opacity-20 border-yellow-700' : 'bg-red-900 bg-opacity-20 border-red-700'}`}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-bold text-gray-200">Chunk {log.chunk}</span>
+                      <span className={`text-xs font-bold px-2 py-1 rounded-full ${log.success ? 'bg-yellow-600 text-white' : 'bg-red-600 text-white'}`}>
+                        {log.success ? 'Recovered' : 'Failed'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Took <span className="text-white font-semibold">{log.attempts}</span> attempt(s).
+                      {!log.success && " This section has been replaced with a placeholder in the subtitles."}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-700 bg-gray-900 flex justify-end">
+              <button 
+                onClick={() => setShowSummaryModal(false)}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors"
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

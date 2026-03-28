@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { fileToBase64 } from '../utils/fileUtils';
 
 const formatDurationForPrompt = (seconds: number): string => {
@@ -80,10 +80,10 @@ const cleanSegments = (segments: any[]) => {
             current.end = current.start + 0.1;
         }
         
-        // Safety check 2: Enforce absolute maximum duration (e.g., 8 seconds for a subtitle)
+        // Safety check 2: Enforce absolute maximum duration (e.g., 15 seconds for a subtitle)
         // This prevents subtitles from hanging on screen during long silences.
-        if (current.end - current.start > 8) {
-            current.end = current.start + 8;
+        if (current.end - current.start > 15) {
+            current.end = current.start + 15;
         }
     }
     return segments;
@@ -183,13 +183,18 @@ const blobToBase64 = (blob: Blob): Promise<{ mimeType: string; data: string; }> 
 
 // --- Main Transcription Logic ---
 
+export interface TranscriptionResult {
+  data: string;
+  retryLog: { chunk: number; attempts: number; success: boolean }[];
+}
+
 export const transcribeVideo = async (
   videoFile: File, 
   duration: number | null, 
   apiKey: string,
   modelName: string = 'gemini-3-flash-preview',
   onProgress?: (msg: string) => void
-): Promise<string> => {
+): Promise<TranscriptionResult | string> => {
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     
@@ -200,6 +205,7 @@ export const transcribeVideo = async (
 
     let chunks: Blob[] = [];
     let useChunking = true;
+    const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
 
     try {
         chunks = await extractAudioChunks(videoFile, reportProgress);
@@ -237,9 +243,9 @@ export const transcribeVideo = async (
             CRITICAL RULES:
             1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Cover the full ${Math.round(actualChunkDuration)} seconds. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
             2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-            3. Break text at logical boundaries: ALWAYS split segments at commas (,), periods (.), conjunctions (and, but, because), or natural pauses.
-            4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words). Do not output massive blocks of text.
-            5. Timestamps MUST match the audio exactly. Do not compress timestamps.
+            3. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
+            4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+            5. Timestamps MUST match the audio exactly. When you split a sentence at a comma, you MUST check the EXACT time the word before the comma ends, and the exact time the word after the comma begins. DO NOT estimate or interpolate timestamps.
             6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
 
@@ -278,10 +284,10 @@ export const transcribeVideo = async (
                           }
                         },
                         safetySettings: [
-                          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }
+                          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
                         ]
                       }
                     });
@@ -303,6 +309,7 @@ export const transcribeVideo = async (
             }
 
             if (parsed.length > 0) {
+                retryLog.push({ chunk: i + 1, attempts, success: true });
                 const timeOffset = i * chunkDuration;
                     
                     // We no longer filter out the overlap region blindly, as it caused missing segments.
@@ -324,6 +331,7 @@ export const transcribeVideo = async (
                     allSegments.push(...adjustedSegments);
             } else {
                 // If it completely failed after all retries, insert a placeholder so the user knows there's a gap
+                retryLog.push({ chunk: i + 1, attempts, success: false });
                 reportProgress(`Warning: Chunk ${i + 1} failed completely. Inserting placeholder.`);
                 allSegments.push({
                     start: i * chunkDuration,
@@ -335,7 +343,7 @@ export const transcribeVideo = async (
 
         reportProgress("Finalizing transcription...");
         const cleanedSegments = cleanSegments(allSegments);
-        return JSON.stringify(cleanedSegments);
+        return { data: JSON.stringify(cleanedSegments), retryLog };
     }
 
     // --- Fallback: Process entire video at once ---
@@ -355,9 +363,9 @@ export const transcribeVideo = async (
     CRITICAL RULES:
     1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
     2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-    3. Break text at logical boundaries: ALWAYS split segments at commas (,), periods (.), conjunctions (and, but, because), or natural pauses.
-    4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words). Do not output massive blocks of text.
-    5. Timestamps MUST match the audio exactly. Do not compress timestamps.
+    3. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
+    4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+    5. Timestamps MUST match the audio exactly. When you split a sentence at a comma, you MUST check the EXACT time the word before the comma ends, and the exact time the word after the comma begins. DO NOT estimate or interpolate timestamps.
     6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
     `;
 
@@ -384,10 +392,10 @@ export const transcribeVideo = async (
           }
         },
         safetySettings: [
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
         ]
       }
     });
@@ -409,12 +417,12 @@ export const transcribeVideo = async (
                 text: seg.text
             }));
             const cleanedSegments = cleanSegments(normalizedParsed);
-            return JSON.stringify(cleanedSegments);
+            return { data: JSON.stringify(cleanedSegments), retryLog: [] };
         }
     } catch (e) {
         console.error("Failed to parse fallback JSON", e);
     }
-    return resultText;
+    return { data: resultText, retryLog: [] };
   } catch (error) {
     console.error("Error transcribing video:", error);
     if (error instanceof Error) {
