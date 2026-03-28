@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   
   // Model Selection State
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
   const models = [
     { id: 'gemini-3-flash-preview', name: '(20)Gemini 3 Flash Preview' },
     { id: 'gemini-3.1-pro-preview', name: '(0)Gemini 3.1 Pro Preview' },
@@ -364,7 +364,7 @@ const App: React.FC = () => {
             Gemini Video Transcriber
           </h1>
           <p className="mt-4 text-lg text-gray-300">
-            Upload a video to get a timestamped transcript using <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>.
+            Upload a video to get a timestamped transcript using <div className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</div>.
           </p>
         </header>
 
