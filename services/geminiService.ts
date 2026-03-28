@@ -56,7 +56,9 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) throw new Error("AudioContext not supported in this browser.");
     
-    const audioCtx = new AudioContextClass();
+    // Force 16kHz sample rate. Gemini processes audio natively at 16kHz. 
+    // This prevents timestamp drift caused by sample rate mismatches.
+    const audioCtx = new AudioContextClass({ sampleRate: 16000 });
     
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -179,9 +181,8 @@ export const transcribeVideo = async (
             ]`;
 
             promptText += `\n\nCRITICAL TIMING RULES:
-            1. The absolute total duration of this clip is approximately ${actualChunkDuration} seconds.
-            2. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-            3. Do not stretch, scale, or hallucinate timestamps. Map the text strictly to the actual audio timeline.`;
+            1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
+            2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
 
             const textPart = { text: promptText };
 
@@ -266,12 +267,9 @@ export const transcribeVideo = async (
       {"start": 3.3, "end": 6.1, "text": "หัวข้อที่เราจะคุยกันในวันนี้คือ..." }
     ]`;
 
-    if (duration !== null) {
-        promptText += `\n\nCRITICAL TIMING RULES:
-        1. The absolute total duration of this video is exactly ${duration} seconds (${Math.floor(duration / 60)} minutes and ${Math.round(duration % 60)} seconds).
-        2. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
-        3. Do not stretch, scale, or hallucinate timestamps. Map the text strictly to the actual audio timeline.`;
-    }
+    promptText += `\n\nCRITICAL TIMING RULES:
+    1. COMPLETENESS IS MANDATORY: You MUST transcribe every single word until the very last second of the audio. DO NOT stop early or cut off the final sentence.
+    2. RELY ON AUDIO TIMELINE: Do not calculate or guess the timestamps. Extract the exact start and end times directly from the audio stream.`;
 
     const textPart = {
       text: promptText,
