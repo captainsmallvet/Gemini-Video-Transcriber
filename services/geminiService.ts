@@ -61,7 +61,7 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-    const CHUNK_DURATION_SEC = 5 * 60; // 5 minutes core chunk
+    const CHUNK_DURATION_SEC = 2 * 60; // 2 minutes core chunk
     const OVERLAP_SEC = 5; // 5 seconds overlap
     const sampleRate = audioBuffer.sampleRate;
     const totalLength = audioBuffer.length;
@@ -133,7 +133,7 @@ export const transcribeVideo = async (
 
     if (useChunking && chunks.length > 0) {
         let allSegments: any[] = [];
-        const chunkDuration = 5 * 60; // 5 minutes
+        const chunkDuration = 2 * 60; // 2 minutes
 
         for (let i = 0; i < chunks.length; i++) {
             reportProgress(`Transcribing part ${i + 1} of ${chunks.length}...`);
@@ -160,6 +160,11 @@ export const transcribeVideo = async (
             3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
             4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
             5. DO NOT combine long paragraphs into a single segment.
+            
+            TIMING ACCURACY RULES:
+            1. Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
+            2. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s). DO NOT hallucinate large gaps in time (like jumping 10 or 40 seconds) if there is no actual silence.
+            3. The timestamps must progress logically and linearly.
             
             Each object must have:
             - "start": start time in seconds (number)
@@ -243,6 +248,11 @@ export const transcribeVideo = async (
     3. A single subtitle segment MUST NOT exceed 5 seconds in duration.
     4. If a sentence is long, split it into multiple segments at natural pauses (commas, conjunctions).
     5. DO NOT combine long paragraphs into a single segment.
+    
+    TIMING ACCURACY RULES:
+    1. Ensure the timestamps are strictly accurate to the audio. Do not skip any parts.
+    2. NO GAPS: If the speaker is talking continuously, the "start" time of the next segment MUST immediately follow the "end" time of the previous segment (e.g., gap < 0.5s). DO NOT hallucinate large gaps in time (like jumping 10 or 40 seconds) if there is no actual silence.
+    3. The timestamps must progress logically and linearly.
     
     Each object must have:
     - "start": start time in seconds (number)
