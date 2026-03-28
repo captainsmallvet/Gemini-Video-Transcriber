@@ -34,18 +34,45 @@ const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
     
+    // Deduplication pass: remove segments that are too similar and overlapping
+    const deduplicated = [];
+    for (let i = 0; i < segments.length; i++) {
+        const current = segments[i];
+        if (deduplicated.length > 0) {
+            const prev = deduplicated[deduplicated.length - 1];
+            // If current starts very close to prev, and text is similar or one contains the other
+            const timeDiff = Math.abs(current.start - prev.start);
+            if (timeDiff < 4.0) {
+                const prevText = prev.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const currText = current.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                // Only deduplicate if the text is significantly overlapping
+                if (prevText.length > 3 && currText.length > 3 && (prevText.includes(currText) || currText.includes(prevText))) {
+                    // Keep the longer one
+                    if (currText.length > prevText.length) {
+                        deduplicated[deduplicated.length - 1] = current;
+                    }
+                    continue; // Skip adding current as a new segment
+                }
+            }
+        }
+        deduplicated.push(current);
+    }
+    
+    segments = deduplicated;
+
     for (let j = 0; j < segments.length; j++) {
         const current = segments[j];
         const next = segments[j + 1];
         
-        // Automatically set the end time to just before the next segment starts
-        if (next) {
+        // If AI didn't provide a valid end time, estimate it
+        if (!current.end || current.end <= current.start) {
+            current.end = current.start + 3; // Default 3 seconds
+        }
+        
+        // Prevent overlapping with the next segment
+        if (next && current.end > next.start) {
             current.end = next.start - 0.001;
-        } else {
-            // For the very last segment, give it a default duration if it doesn't have a valid one
-            if (!current.end || current.end <= current.start) {
-                current.end = current.start + 5; // Default 5 seconds for the last segment
-            }
         }
         
         // Safety check 1: ensure end is always strictly greater than start
@@ -53,10 +80,10 @@ const cleanSegments = (segments: any[]) => {
             current.end = current.start + 0.1;
         }
         
-        // Safety check 2: Enforce absolute maximum duration (e.g., 12 seconds for longer 2-3 line sentences)
-        // This prevents subtitles from hanging on screen during long silences or if a chunk fails.
-        if (current.end - current.start > 12) {
-            current.end = current.start + 12;
+        // Safety check 2: Enforce absolute maximum duration (e.g., 8 seconds for a subtitle)
+        // This prevents subtitles from hanging on screen during long silences.
+        if (current.end - current.start > 8) {
+            current.end = current.start + 8;
         }
     }
     return segments;
@@ -203,60 +230,82 @@ export const transcribeVideo = async (
             // The actual duration of the audio blob includes the overlap (except for the last chunk)
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
-            let promptText = `You are a professional transcriber.
-            Task: Transcribe the speech in this audio clip verbatim. 
+            let promptText = `You are a professional video subtitler.
+            Task: Transcribe the speech in this audio clip verbatim from beginning to end.
+            Audio duration: ~${Math.round(actualChunkDuration)} seconds.
             
-            RULES:
-            1. Transcribe EVERY spoken word. Do not summarize or skip.
-            2. Break text into SHORT segments (maximum 10-15 words). 
-            3. ALWAYS split segments at punctuation marks (commas, periods, question marks) or natural pauses. Do not output long paragraphs.
-            4. Timestamps MUST match the audio exactly.
+            CRITICAL RULES:
+            1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Cover the full ${Math.round(actualChunkDuration)} seconds. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
+            2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
+            3. Break text at logical boundaries: ALWAYS split segments at commas (,), periods (.), conjunctions (and, but, because), or natural pauses.
+            4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words). Do not output massive blocks of text.
+            5. Timestamps MUST match the audio exactly. Do not compress timestamps.
+            6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
 
             const textPart = { text: promptText };
 
-            const response = await ai.models.generateContent({
-              model: modelName,
-              contents: { parts: [textPart, audioPart] },
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      start: { type: Type.NUMBER, description: "Start time in seconds" },
-                      end: { type: Type.NUMBER, description: "End time in seconds" },
-                      text: { type: Type.STRING, description: "Transcribed text. Max 10-15 words. Break at commas/periods." }
-                    },
-                    required: ["start", "end", "text"]
-                  }
-                }
-              }
-            });
+            let parsed: any[] = [];
+            let attempts = 0;
+            const maxAttempts = 3; // Increased to 3 for better resilience
 
-            const resultText = response.text || "[]";
-            try {
-                let jsonString = resultText;
-                // Remove markdown code blocks if present
-                jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
-                if (jsonMatch) {
-                    jsonString = jsonMatch[0];
+            while (parsed.length === 0 && attempts < maxAttempts) {
+                if (attempts > 0) {
+                    reportProgress(`Chunk ${i + 1} returned empty, retrying (attempt ${attempts + 1})...`);
                 }
-                const parsed = JSON.parse(jsonString);
-                if (Array.isArray(parsed)) {
-                    const timeOffset = i * chunkDuration;
+                try {
+                    let currentPrompt = promptText;
+                    if (attempts > 0) {
+                        currentPrompt += `\n\nWARNING: Your previous attempt returned an empty array. You MUST transcribe the speech in this audio. Listen carefully and transcribe from 0 to ${Math.round(actualChunkDuration)} seconds.`;
+                    }
+                    const response = await ai.models.generateContent({
+                      model: modelName,
+                      contents: { parts: [{ text: currentPrompt }, audioPart] },
+                      config: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              start: { type: Type.NUMBER, description: "Start time in seconds" },
+                              end: { type: Type.NUMBER, description: "End time in seconds" },
+                                text: { type: Type.STRING, description: "Transcribed text. Max 15 words. Break at commas/periods/conjunctions." }
+                              },
+                              required: ["start", "end", "text"]
+                          }
+                        },
+                        safetySettings: [
+                          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+                          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }
+                        ]
+                      }
+                    });
+
+                    const resultText = response.text || "[]";
+                    let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                    const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                    if (jsonMatch) {
+                        jsonString = jsonMatch[0];
+                    }
+                    const parsedData = JSON.parse(jsonString);
+                    if (Array.isArray(parsedData) && parsedData.length > 0) {
+                        parsed = parsedData;
+                    }
+                } catch (e) {
+                    console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
+                }
+                attempts++;
+            }
+
+            if (parsed.length > 0) {
+                const timeOffset = i * chunkDuration;
                     
-                    // Filter out overlap from previous chunk
-                    // If this is not the first chunk, ignore items that start before the overlap period ends
-                    // The overlap is OVERLAP_SEC (5 seconds) at the end of the previous chunk.
-                    // So for chunk i (i > 0), the first 5 seconds of its audio are actually the overlap from chunk i-1.
-                    // We only want to keep items that start AFTER the overlap period in this chunk's local time.
-                    const OVERLAP_SEC = 5;
-                    const filteredParsed = i > 0 
-                        ? parsed.filter(seg => seg.start >= OVERLAP_SEC)
-                        : parsed;
+                    // We no longer filter out the overlap region blindly, as it caused missing segments.
+                    // Instead, we keep all segments and let cleanSegments handle deduplication.
+                    const filteredParsed = parsed;
 
                     const adjustedSegments = filteredParsed.map(seg => {
                         const s = parseTime(seg.start);
@@ -271,9 +320,6 @@ export const transcribeVideo = async (
                         };
                     });
                     allSegments.push(...adjustedSegments);
-                }
-            } catch (e) {
-                console.error(`Failed to parse JSON for chunk ${i+1}`, e);
             }
         }
 
@@ -293,14 +339,16 @@ export const transcribeVideo = async (
       },
     };
 
-    let promptText = `You are a professional transcriber.
-    Task: Transcribe the speech in this video verbatim. 
+    let promptText = `You are a professional video subtitler.
+    Task: Transcribe the speech in this video verbatim from beginning to end.
     
-    RULES:
-    1. Transcribe EVERY spoken word. Do not summarize or skip.
-    2. Break text into SHORT segments (maximum 10-15 words). 
-    3. ALWAYS split segments at punctuation marks (commas, periods, question marks) or natural pauses. Do not output long paragraphs.
-    4. Timestamps MUST match the audio exactly.
+    CRITICAL RULES:
+    1. TRANSCRIBE THE ENTIRE AUDIO. Do not stop early. Even if there is a long pause or music, wait for the next spoken words and continue transcribing until the very end.
+    2. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
+    3. Break text at logical boundaries: ALWAYS split segments at commas (,), periods (.), conjunctions (and, but, because), or natural pauses.
+    4. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words). Do not output massive blocks of text.
+    5. Timestamps MUST match the audio exactly. Do not compress timestamps.
+    6. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
     `;
 
     const textPart = {
@@ -320,11 +368,17 @@ export const transcribeVideo = async (
             properties: {
               start: { type: Type.NUMBER, description: "Start time in seconds" },
               end: { type: Type.NUMBER, description: "End time in seconds" },
-              text: { type: Type.STRING, description: "Transcribed text. Max 10-15 words. Break at commas/periods." }
+              text: { type: Type.STRING, description: "Transcribed text. Max 15 words. Break at commas/periods/conjunctions." }
             },
             required: ["start", "end", "text"]
           }
-        }
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }
+        ]
       }
     });
 
