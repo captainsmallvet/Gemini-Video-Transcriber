@@ -48,9 +48,15 @@ const cleanSegments = (segments: any[]) => {
             }
         }
         
-        // Safety check: ensure end is always strictly greater than start
+        // Safety check 1: ensure end is always strictly greater than start
         if (current.end <= current.start) {
             current.end = current.start + 0.1;
+        }
+        
+        // Safety check 2: Enforce absolute maximum duration (e.g., 12 seconds for longer 2-3 line sentences)
+        // This prevents subtitles from hanging on screen during long silences or if a chunk fails.
+        if (current.end - current.start > 12) {
+            current.end = current.start + 12;
         }
     }
     return segments;
@@ -199,10 +205,10 @@ export const transcribeVideo = async (
             Output the transcription as a JSON array of objects. 
             
             SUBTITLE LENGTH RULES (CRITICAL):
-            1. Break the text into VERY SHORT, readable subtitle segments.
-            2. ABSOLUTE MAXIMUM of 10 words per segment. If a sentence is longer, you MUST split it at natural pauses.
-            3. A single subtitle segment MUST NOT exceed 1 line of text.
-            4. DO NOT combine long paragraphs into a single segment.
+            1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
+            2. DO NOT cut sentences in the middle just to make them short. It is better to keep a complete thought together.
+            3. A single subtitle segment can be 1 to 3 lines long.
+            4. Only split a single sentence if it is extremely long (would take more than 3 lines).
             
             TIMING ACCURACY RULES (CRITICAL):
             1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
@@ -236,7 +242,12 @@ export const transcribeVideo = async (
 
             const resultText = response.text || "[]";
             try {
-                const parsed = JSON.parse(resultText);
+                let jsonString = resultText;
+                const jsonMatch = resultText.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    jsonString = jsonMatch[0];
+                }
+                const parsed = JSON.parse(jsonString);
                 if (Array.isArray(parsed)) {
                     const timeOffset = i * chunkDuration;
                     
@@ -290,10 +301,10 @@ export const transcribeVideo = async (
     Output the transcription as a JSON array of objects. 
     
     SUBTITLE LENGTH RULES (CRITICAL):
-    1. Break the text into VERY SHORT, readable subtitle segments.
-    2. ABSOLUTE MAXIMUM of 10 words per segment. If a sentence is longer, you MUST split it at natural pauses.
-    3. A single subtitle segment MUST NOT exceed 1 line of text.
-    4. DO NOT combine long paragraphs into a single segment.
+    1. Break the text at natural linguistic boundaries (periods, commas, conjunctions) to preserve meaning and readability.
+    2. DO NOT cut sentences in the middle just to make them short. It is better to keep a complete thought together.
+    3. A single subtitle segment can be 1 to 3 lines long.
+    4. Only split a single sentence if it is extremely long (would take more than 3 lines).
     
     TIMING ACCURACY RULES (CRITICAL):
     1. DO NOT INTERPOLATE OR GUESS TIMESTAMPS. You must listen to the actual audio and mark the EXACT second the words are spoken.
@@ -330,7 +341,12 @@ export const transcribeVideo = async (
 
     const resultText = response.text || "[]";
     try {
-        const parsed = JSON.parse(resultText);
+        let jsonString = resultText;
+        const jsonMatch = resultText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+            jsonString = jsonMatch[0];
+        }
+        const parsed = JSON.parse(jsonString);
         if (Array.isArray(parsed)) {
             const normalizedParsed = parsed.map(seg => ({
                 start: parseTime(seg.start),
