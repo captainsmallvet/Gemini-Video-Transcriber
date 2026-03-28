@@ -14,6 +14,28 @@ const formatDurationForPrompt = (seconds: number): string => {
     return `${formattedMinutes}:${formattedSeconds}`;
 };
 
+const cleanSegments = (segments: any[]) => {
+    // Sort by start time to ensure chronological order
+    segments.sort((a, b) => a.start - b.start);
+    
+    for (let j = 0; j < segments.length; j++) {
+        const current = segments[j];
+        const next = segments[j + 1];
+        
+        // 1. Fix overlaps with the next segment
+        if (next && current.end > next.start) {
+            // If they overlap, cut the current one short, just before the next starts
+            current.end = Math.max(current.start + 0.1, next.start - 0.001);
+        }
+        
+        // 2. Enforce maximum duration (e.g., 7 seconds max to be safe)
+        if (current.end - current.start > 7) {
+            current.end = current.start + 7;
+        }
+    }
+    return segments;
+};
+
 // --- Audio Chunking Utilities ---
 
 function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
@@ -227,7 +249,8 @@ export const transcribeVideo = async (
         }
 
         reportProgress("Finalizing transcription...");
-        return JSON.stringify(allSegments);
+        const cleanedSegments = cleanSegments(allSegments);
+        return JSON.stringify(cleanedSegments);
     }
 
     // --- Fallback: Process entire video at once ---
@@ -287,7 +310,17 @@ export const transcribeVideo = async (
       }
     });
 
-    return response.text || "[]";
+    const resultText = response.text || "[]";
+    try {
+        const parsed = JSON.parse(resultText);
+        if (Array.isArray(parsed)) {
+            const cleanedSegments = cleanSegments(parsed);
+            return JSON.stringify(cleanedSegments);
+        }
+    } catch (e) {
+        console.error("Failed to parse fallback JSON", e);
+    }
+    return resultText;
   } catch (error) {
     console.error("Error transcribing video:", error);
     if (error instanceof Error) {
