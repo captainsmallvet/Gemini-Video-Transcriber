@@ -478,6 +478,7 @@ export const alignDraftWithAudio = async (
 
     if (useChunking && chunks.length > 0) {
         const chunkDuration = 1 * 60; // 1 minute
+        let lastMatchedLineIndex = -1;
 
         for (let i = 0; i < chunks.length; i++) {
             reportProgress(`Aligning part ${i + 1} of ${chunks.length}...`);
@@ -486,21 +487,26 @@ export const alignDraftWithAudio = async (
             
             const audioPart = { inlineData: { mimeType, data: audioData } };
 
-            let promptText = `You are an expert audio-text aligner.
-            I am providing an audio chunk and the FULL draft transcript of the entire media.
-            
-            FULL DRAFT:
-            ${draftFormatted}
+            const windowStart = Math.max(0, lastMatchedLineIndex - 5);
+            const windowEnd = Math.min(lines.length, windowStart + 150);
+            const draftWindowLines = lines.slice(windowStart, windowEnd);
+            const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
 
-            Task: Listen to the audio chunk. Identify EXACTLY WHICH lines from the draft are spoken in this specific chunk.
+            let promptText = `You are an expert audio-text aligner.
+            I am providing an audio chunk (1 minute long) and a section of the draft transcript.
+            
+            DRAFT SECTION:
+            ${draftFormattedWindow}
+
+            Task: Listen to the audio chunk carefully. Identify EVERY SINGLE LINE from the draft section that is spoken in this specific chunk.
             Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
             
             CRITICAL RULES:
-            1. ONLY include lines that you actually hear in THIS specific audio chunk.
-            2. 'lineIndex' MUST match the index in the draft exactly (e.g., 0, 1, 2).
+            1. You MUST include EVERY line from the draft that you hear in this chunk. Do not skip any lines.
+            2. 'lineIndex' MUST match the index in the draft exactly as shown in the brackets (e.g., [28] -> 28).
             3. 'start' MUST be the exact start time in seconds (e.g., 14.5) relative to the beginning of this chunk.
-            4. DO NOT alter the text. DO NOT hallucinate lines that are not in the draft.
-            5. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
+            4. If a line is partially in this chunk, include it.
+            5. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 5.4}]
             `;
 
             let parsed: any[] = [];
@@ -552,12 +558,19 @@ export const alignDraftWithAudio = async (
             if (parsed.length > 0) {
                 retryLog.push({ chunk: i + 1, attempts, success: true });
                 const timeOffset = i * chunkDuration;
+                let maxIndexInChunk = -1;
                 parsed.forEach(seg => {
                     const globalStart = parseTime(seg.start) + timeOffset;
                     if (!aligned.has(seg.lineIndex)) {
                         aligned.set(seg.lineIndex, globalStart);
                     }
+                    if (seg.lineIndex > maxIndexInChunk) {
+                        maxIndexInChunk = seg.lineIndex;
+                    }
                 });
+                if (maxIndexInChunk > lastMatchedLineIndex) {
+                    lastMatchedLineIndex = maxIndexInChunk;
+                }
             } else {
                 retryLog.push({ chunk: i + 1, attempts, success: false });
                 reportProgress(`Warning: Chunk ${i + 1} failed completely.`);
@@ -574,13 +587,14 @@ export const alignDraftWithAudio = async (
         FULL DRAFT:
         ${draftFormatted}
 
-        Task: Listen to the media. Identify the exact start time for EVERY line in the draft.
+        Task: Listen to the media carefully. Identify the exact start time for EVERY SINGLE LINE in the draft.
         Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
         
         CRITICAL RULES:
-        1. 'lineIndex' MUST match the index in the draft exactly.
-        2. 'start' MUST be the exact start time in seconds (e.g., 14.5).
-        3. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
+        1. You MUST include EVERY line from the draft. Do not skip any lines.
+        2. 'lineIndex' MUST match the index in the draft exactly.
+        3. 'start' MUST be the exact start time in seconds (e.g., 14.5).
+        4. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
         `;
 
         reportProgress("Generating alignment...");
