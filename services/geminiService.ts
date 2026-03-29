@@ -243,8 +243,8 @@ export const transcribeVideo = async (
             1. TRANSCRIBE THE ENTIRE AUDIO CHRONOLOGICALLY. Do not stop early. Cover the full ${Math.round(actualChunkDuration)} seconds.
             2. DO NOT add introductory summaries, titles, or pull quotes at the beginning. Transcribe strictly what is spoken, when it is spoken.
             3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-            4. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
-            5. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+            4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
+            5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
             6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps. Text spoken at the end of the audio must have a timestamp at the end of the audio.
             7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
@@ -278,7 +278,7 @@ export const transcribeVideo = async (
                             properties: {
                               start: { type: Type.NUMBER, description: "Start time in seconds" },
                               end: { type: Type.NUMBER, description: "End time in seconds" },
-                                text: { type: Type.STRING, description: "Transcribed text. Max 15 words. Break at commas/periods/conjunctions." }
+                                text: { type: Type.STRING, description: "Transcribed text. STRICT MAXIMUM OF 10 WORDS. You must split longer sentences into multiple objects." }
                               },
                               required: ["start", "end", "text"]
                           }
@@ -364,8 +364,8 @@ export const transcribeVideo = async (
     1. TRANSCRIBE THE ENTIRE AUDIO CHRONOLOGICALLY. Do not stop early.
     2. DO NOT add introductory summaries, titles, or pull quotes at the beginning. Transcribe strictly what is spoken, when it is spoken.
     3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
-    4. Break text at logical boundaries: You MUST split segments EVERY TIME there is a punctuation mark (especially commas ',' and periods '.'). DO NOT split mid-sentence unless there is a punctuation mark.
-    5. Keep segments readable: Aim for 1 to 2 lines per subtitle (max 15 words).
+    4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
+    5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
     6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps.
     7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
     `;
@@ -387,7 +387,7 @@ export const transcribeVideo = async (
             properties: {
               start: { type: Type.NUMBER, description: "Start time in seconds" },
               end: { type: Type.NUMBER, description: "End time in seconds" },
-              text: { type: Type.STRING, description: "Transcribed text. Max 15 words. Break at commas/periods/conjunctions." }
+              text: { type: Type.STRING, description: "Transcribed text. STRICT MAXIMUM OF 10 WORDS. You must split longer sentences into multiple objects." }
             },
             required: ["start", "end", "text"]
           }
