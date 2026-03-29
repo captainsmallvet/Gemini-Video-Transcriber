@@ -245,8 +245,9 @@ export const transcribeVideo = async (
             3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
             4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
             5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
-            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps. Text spoken at the end of the audio must have a timestamp at the end of the audio.
-            7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format.
+            7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. If a word is spoken at second 45, its timestamp MUST be around 45. You MUST align the text with the ACTUAL audio timing.
+            8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
 
             const textPart = { text: promptText };
@@ -366,8 +367,9 @@ export const transcribeVideo = async (
     3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
     4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
     5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
-    6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. DO NOT hallucinate timestamps.
-    7. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+    6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format.
+    7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. You MUST align the text with the ACTUAL audio timing.
+    8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
     `;
 
     const textPart = {
