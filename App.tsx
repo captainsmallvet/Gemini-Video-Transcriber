@@ -440,7 +440,9 @@ const App: React.FC = () => {
             Gemini Video Transcriber
           </h1>
           <p className="mt-4 text-lg text-gray-300">
-            Upload a video to get a timestamped transcript using <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>.
+            Upload a video to get a timestamped transcript using
+            <br />
+            <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>
           </p>
         </header>
 
@@ -495,19 +497,9 @@ const App: React.FC = () => {
                       </svg>
                     </button>
                   </div>
-                  {videoFile.type.startsWith('video/') ? (
-                    <video 
-                      src={URL.createObjectURL(videoFile)} 
-                      className="w-full h-32 object-cover rounded bg-black"
-                      controls
-                    />
-                  ) : (
-                    <audio 
-                      src={URL.createObjectURL(videoFile)} 
-                      className="w-full mt-4"
-                      controls
-                    />
-                  )}
+                  <div className="flex-grow flex items-center justify-center bg-gray-800 rounded border border-gray-600">
+                    <p className="text-gray-400 text-sm">Media ready for processing</p>
+                  </div>
                 </div>
               )}
             </div>

@@ -488,7 +488,17 @@ export const alignDraftWithAudio = async (
             const audioPart = { inlineData: { mimeType, data: audioData } };
 
             const windowStart = Math.max(0, lastMatchedLineIndex - 5);
-            const windowEnd = Math.min(lines.length, windowStart + 150);
+            let windowEnd = windowStart;
+            let currentLength = 0;
+            while (windowEnd < lines.length && currentLength < 1500) {
+                currentLength += lines[windowEnd].length + 1; // +1 for newline
+                windowEnd++;
+            }
+            // Ensure we include at least a few lines if they are very long
+            if (windowEnd - windowStart < 5 && windowEnd < lines.length) {
+                windowEnd = Math.min(lines.length, windowStart + 5);
+            }
+
             const draftWindowLines = lines.slice(windowStart, windowEnd);
             const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
 
@@ -640,6 +650,45 @@ export const alignDraftWithAudio = async (
     }
 
     reportProgress("Finalizing alignment...");
+
+    // Enforce strict monotonicity using Longest Increasing Subsequence (LIS)
+    // This removes any hallucinated timestamps that go backwards or overlap.
+    const sortedIndices = Array.from(aligned.keys()).sort((a, b) => a - b);
+    if (sortedIndices.length > 0) {
+        const times = sortedIndices.map(i => aligned.get(i)!);
+        const dp = new Array(times.length).fill(1);
+        const prev = new Array(times.length).fill(-1);
+        
+        let maxLength = 0;
+        let bestEnd = -1;
+        
+        for (let i = 0; i < times.length; i++) {
+            for (let j = 0; j < i; j++) {
+                // Ensure strictly increasing time
+                if (times[i] > times[j] && dp[j] + 1 > dp[i]) {
+                    dp[i] = dp[j] + 1;
+                    prev[i] = j;
+                }
+            }
+            if (dp[i] > maxLength) {
+                maxLength = dp[i];
+                bestEnd = i;
+            }
+        }
+        
+        const validIndices = new Set<number>();
+        let curr = bestEnd;
+        while (curr !== -1) {
+            validIndices.add(sortedIndices[curr]);
+            curr = prev[curr];
+        }
+        
+        for (const index of sortedIndices) {
+            if (!validIndices.has(index)) {
+                aligned.delete(index);
+            }
+        }
+    }
 
     let lastKnownTime = 0;
     let lastKnownIndex = -1;
