@@ -137,8 +137,8 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-    const CHUNK_DURATION_SEC = 1 * 60; // 1 minute core chunk to prevent AI timestamp interpolation drift
-    const OVERLAP_SEC = 5; // 5 seconds overlap
+    const CHUNK_DURATION_SEC = 30; // 30 seconds core chunk to prevent AI timestamp interpolation drift
+    const OVERLAP_SEC = 3; // 3 seconds overlap
     const sampleRate = audioBuffer.sampleRate;
     const totalLength = audioBuffer.length;
     const chunkLength = CHUNK_DURATION_SEC * sampleRate;
@@ -215,9 +215,13 @@ export const transcribeVideo = async (
 
     if (useChunking && chunks.length > 0) {
         let allSegments: any[] = [];
-        const chunkDuration = 1 * 60; // 1 minute
+        const chunkDuration = 30; // 30 seconds
 
         for (let i = 0; i < chunks.length; i++) {
+            if (i > 0) {
+                reportProgress(`Waiting 3 seconds before processing chunk ${i + 1}...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
             reportProgress(`Transcribing part ${i + 1} of ${chunks.length}...`);
             const chunkBlob = chunks[i];
             const { mimeType, data: audioData } = await blobToBase64(chunkBlob);
@@ -229,8 +233,8 @@ export const transcribeVideo = async (
               },
             };
 
-            const chunkDurationSec = 60;
-            const overlapSec = 5;
+            const chunkDurationSec = 30;
+            const overlapSec = 3;
             const isLastChunk = i === chunks.length - 1;
             // The actual duration of the audio blob includes the overlap (except for the last chunk)
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
@@ -477,10 +481,14 @@ export const alignDraftWithAudio = async (
     const aligned = new Map<number, number>();
 
     if (useChunking && chunks.length > 0) {
-        const chunkDuration = 1 * 60; // 1 minute
+        const chunkDuration = 30; // 30 seconds
         let lastMatchedLineIndex = -1;
 
         for (let i = 0; i < chunks.length; i++) {
+            if (i > 0) {
+                reportProgress(`Waiting 3 seconds before processing chunk ${i + 1}...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
             reportProgress(`Aligning part ${i + 1} of ${chunks.length}...`);
             const chunkBlob = chunks[i];
             const { mimeType, data: audioData } = await blobToBase64(chunkBlob);
@@ -490,7 +498,7 @@ export const alignDraftWithAudio = async (
             const windowStart = Math.max(0, lastMatchedLineIndex - 5);
             let windowEnd = windowStart;
             let currentLength = 0;
-            while (windowEnd < lines.length && currentLength < 1500) {
+            while (windowEnd < lines.length && currentLength < 800) {
                 currentLength += lines[windowEnd].length + 1; // +1 for newline
                 windowEnd++;
             }
@@ -503,7 +511,7 @@ export const alignDraftWithAudio = async (
             const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
 
             let promptText = `You are an expert audio-text aligner.
-            I am providing an audio chunk (1 minute long) and a section of the draft transcript.
+            I am providing an audio chunk (30 seconds long) and a section of the draft transcript.
             
             DRAFT SECTION:
             ${draftFormattedWindow}
