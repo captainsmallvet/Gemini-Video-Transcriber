@@ -443,3 +443,244 @@ export const transcribeVideo = async (
     return "An unknown error occurred during transcription.";
   }
 };
+
+export const alignDraftWithAudio = async (
+  mediaFile: File, 
+  draftText: string,
+  duration: number | null, 
+  apiKey: string,
+  modelName: string = 'gemini-3-flash-preview',
+  onProgress?: (msg: string) => void
+): Promise<TranscriptionResult | string> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
+    const reportProgress = (msg: string) => {
+        if (onProgress) onProgress(msg);
+        console.log(msg);
+    };
+
+    const lines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) return "Error: Draft text is empty.";
+    const draftFormatted = lines.map((l, i) => `[${i}] ${l}`).join('\n');
+
+    let chunks: Blob[] = [];
+    let useChunking = true;
+    const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
+
+    try {
+        chunks = await extractAudioChunks(mediaFile, reportProgress);
+    } catch (audioErr) {
+        console.warn("Audio extraction failed, falling back to full media upload.", audioErr);
+        useChunking = false;
+    }
+
+    const aligned = new Map<number, number>();
+
+    if (useChunking && chunks.length > 0) {
+        const chunkDuration = 1 * 60; // 1 minute
+
+        for (let i = 0; i < chunks.length; i++) {
+            reportProgress(`Aligning part ${i + 1} of ${chunks.length}...`);
+            const chunkBlob = chunks[i];
+            const { mimeType, data: audioData } = await blobToBase64(chunkBlob);
+            
+            const audioPart = { inlineData: { mimeType, data: audioData } };
+
+            let promptText = `You are an expert audio-text aligner.
+            I am providing an audio chunk and the FULL draft transcript of the entire media.
+            
+            FULL DRAFT:
+            ${draftFormatted}
+
+            Task: Listen to the audio chunk. Identify EXACTLY WHICH lines from the draft are spoken in this specific chunk.
+            Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
+            
+            CRITICAL RULES:
+            1. ONLY include lines that you actually hear in THIS specific audio chunk.
+            2. 'lineIndex' MUST match the index in the draft exactly (e.g., 0, 1, 2).
+            3. 'start' MUST be the exact start time in seconds (e.g., 14.5) relative to the beginning of this chunk.
+            4. DO NOT alter the text. DO NOT hallucinate lines that are not in the draft.
+            5. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
+            `;
+
+            let parsed: any[] = [];
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (parsed.length === 0 && attempts < maxAttempts) {
+                if (attempts > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const response = await ai.models.generateContent({
+                      model: modelName,
+                      contents: { parts: [{ text: promptText }, audioPart] },
+                      config: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              lineIndex: { type: Type.NUMBER, description: "Index of the line from the draft" },
+                              start: { type: Type.NUMBER, description: "Start time in seconds relative to this chunk" }
+                            },
+                            required: ["lineIndex", "start"]
+                          }
+                        },
+                        safetySettings: [
+                          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+                        ]
+                      }
+                    });
+
+                    const resultText = response.text || "[]";
+                    let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                    const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                    if (jsonMatch) jsonString = jsonMatch[0];
+                    const parsedData = JSON.parse(jsonString);
+                    if (Array.isArray(parsedData) && parsedData.length > 0) {
+                        parsed = parsedData;
+                    }
+                } catch (e) {
+                    console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
+                }
+                attempts++;
+            }
+
+            if (parsed.length > 0) {
+                retryLog.push({ chunk: i + 1, attempts, success: true });
+                const timeOffset = i * chunkDuration;
+                parsed.forEach(seg => {
+                    const globalStart = parseTime(seg.start) + timeOffset;
+                    if (!aligned.has(seg.lineIndex)) {
+                        aligned.set(seg.lineIndex, globalStart);
+                    }
+                });
+            } else {
+                retryLog.push({ chunk: i + 1, attempts, success: false });
+                reportProgress(`Warning: Chunk ${i + 1} failed completely.`);
+            }
+        }
+    } else {
+        reportProgress("Uploading full media...");
+        const { mimeType, data: videoData } = await fileToBase64(mediaFile);
+        const videoPart = { inlineData: { mimeType, data: videoData } };
+
+        let promptText = `You are an expert audio-text aligner.
+        I am providing a media file and its FULL draft transcript.
+        
+        FULL DRAFT:
+        ${draftFormatted}
+
+        Task: Listen to the media. Identify the exact start time for EVERY line in the draft.
+        Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
+        
+        CRITICAL RULES:
+        1. 'lineIndex' MUST match the index in the draft exactly.
+        2. 'start' MUST be the exact start time in seconds (e.g., 14.5).
+        3. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
+        `;
+
+        reportProgress("Generating alignment...");
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts: [{ text: promptText }, videoPart] },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  lineIndex: { type: Type.NUMBER, description: "Index of the line from the draft" },
+                  start: { type: Type.NUMBER, description: "Start time in seconds" }
+                },
+                required: ["lineIndex", "start"]
+              }
+            },
+            safetySettings: [
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+            ]
+          }
+        });
+
+        const resultText = response.text || "[]";
+        try {
+            let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+            if (jsonMatch) jsonString = jsonMatch[0];
+            const parsed = JSON.parse(jsonString);
+            if (Array.isArray(parsed)) {
+                parsed.forEach(seg => {
+                    aligned.set(seg.lineIndex, parseTime(seg.start));
+                });
+            }
+        } catch (e) {
+            console.error("Failed to parse fallback JSON", e);
+        }
+    }
+
+    reportProgress("Finalizing alignment...");
+
+    let lastKnownTime = 0;
+    let lastKnownIndex = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+        if (aligned.has(i)) {
+            lastKnownTime = aligned.get(i)!;
+            lastKnownIndex = i;
+        } else {
+            let nextKnownTime = duration || lastKnownTime + (lines.length - i) * 3;
+            let nextKnownIndex = lines.length;
+            for (let j = i + 1; j < lines.length; j++) {
+                if (aligned.has(j)) {
+                    nextKnownTime = aligned.get(j)!;
+                    nextKnownIndex = j;
+                    break;
+                }
+            }
+            
+            const gap = nextKnownIndex - lastKnownIndex;
+            const timeGap = nextKnownTime - lastKnownTime;
+            const timePerLine = timeGap / gap;
+            
+            const interpolatedTime = lastKnownTime + timePerLine * (i - lastKnownIndex);
+            aligned.set(i, interpolatedTime);
+        }
+    }
+
+    const finalSegments = [];
+    for (let i = 0; i < lines.length; i++) {
+        const start = aligned.get(i)!;
+        let end = duration || start + 3;
+        if (i < lines.length - 1) {
+            end = aligned.get(i + 1)! - 0.001;
+        }
+        
+        if (end <= start) end = start + 0.1;
+        
+        finalSegments.push({
+            start,
+            end,
+            text: lines[i]
+        });
+    }
+
+    return { data: JSON.stringify(finalSegments), retryLog };
+
+  } catch (error) {
+    console.error("Error aligning draft:", error);
+    if (error instanceof Error) {
+        if (error.message.includes('deadline')) return 'Error: The request timed out.';
+        if (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID')) return 'Error: The provided API key is invalid.';
+        if (error.message.includes('not found')) return `Error: The selected model '${modelName}' was not found.`;
+        return `Error: ${error.message}`;
+    }
+    return "An unknown error occurred during alignment.";
+  }
+};

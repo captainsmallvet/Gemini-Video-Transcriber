@@ -1,10 +1,12 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { transcribeVideo } from './services/geminiService';
+import { transcribeVideo, alignDraftWithAudio } from './services/geminiService';
 import Spinner from './components/Spinner';
 
 const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [draftFile, setDraftFile] = useState<File | null>(null);
+  const [draftText, setDraftText] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [segments, setSegments] = useState<{start: number, end: number, text: string}[]>([]);
   const [activeTab, setActiveTab] = useState<'txt' | 'srt'>('txt');
@@ -38,6 +40,7 @@ const App: React.FC = () => {
   const [apiKeyStatus, setApiKeyStatus] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize API Key from localStorage or process.env
   useEffect(() => {
@@ -91,32 +94,105 @@ const App: React.FC = () => {
   };
 
   const handleFileSelect = (file: File) => {
-    if (file && file.type.startsWith('video/')) {
+    if (file && (file.type.startsWith('video/') || file.type.startsWith('audio/'))) {
       setVideoFile(file);
       setError(null);
       setTranscript(null);
       setVideoDuration(null);
 
-      const videoUrl = URL.createObjectURL(file);
-      const videoElement = document.createElement('video');
-      videoElement.preload = 'metadata';
+      const mediaUrl = URL.createObjectURL(file);
+      const mediaElement = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('audio');
+      mediaElement.preload = 'metadata';
 
-      videoElement.onloadedmetadata = () => {
-        setVideoDuration(videoElement.duration);
-        URL.revokeObjectURL(videoUrl);
+      mediaElement.onloadedmetadata = () => {
+        setVideoDuration(mediaElement.duration);
+        URL.revokeObjectURL(mediaUrl);
       };
 
-      videoElement.onerror = () => {
-        setError("Could not read video metadata to get duration.");
-        URL.revokeObjectURL(videoUrl);
+      mediaElement.onerror = () => {
+        setError("Could not read media metadata to get duration.");
+        URL.revokeObjectURL(mediaUrl);
       };
 
-      videoElement.src = videoUrl;
+      mediaElement.src = mediaUrl;
     } else {
-      setError('Please select a valid video file.');
+      setError('Please select a valid video or audio file.');
     }
   };
 
+  const handleDraftChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+          setDraftFile(file);
+          const text = await file.text();
+          setDraftText(text);
+          setError(null);
+      } else {
+          setError('Please select a valid .txt file.');
+      }
+    }
+  };
+
+  const removeDraft = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setDraftFile(null);
+      setDraftText(null);
+      if (draftInputRef.current) draftInputRef.current.value = '';
+  };
+
+  const handleAlignDraft = async () => {
+    if (!videoFile || !draftText) return;
+    
+    const keyToUse = activeApiKey || process.env.API_KEY;
+    if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
+      setError('Error: No API Key set. Please enter your API key in the top field and click "send".');
+      return;
+    }
+
+    setIsLoading(true);
+    setProgressMessage('Starting alignment...');
+    setError(null);
+    setTranscript(null);
+    setCopySuccess('');
+    setRetrySummary([]);
+    setShowSummaryModal(false);
+
+    try {
+      const result = await alignDraftWithAudio(videoFile, draftText, videoDuration, keyToUse, selectedModel, (msg) => {
+          setProgressMessage(msg);
+      });
+      
+      if (typeof result === 'string' && result.startsWith('Error:')) {
+          setError(result);
+          setTranscript(null);
+          setSegments([]);
+      } else if (typeof result !== 'string') {
+          setTranscript(result.data);
+          
+          const hasRetriesOrFailures = result.retryLog.some(log => log.attempts > 1 || !log.success);
+          if (hasRetriesOrFailures) {
+              setRetrySummary(result.retryLog);
+              setShowSummaryModal(true);
+          }
+
+          try {
+            const parsed = JSON.parse(result.data);
+            if (Array.isArray(parsed)) {
+              setSegments(parsed);
+            }
+          } catch (e) {
+            console.error("Failed to parse transcript as JSON", e);
+            setSegments([]);
+          }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+      setError(`Failed to align draft: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -369,61 +445,131 @@ const App: React.FC = () => {
         </header>
 
         <main className="bg-gray-800 bg-opacity-50 rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 backdrop-blur-sm border border-gray-700">
-          <h2 className="text-xl font-semibold text-center text-gray-200">
-            Transcribe Audio from video clip
-          </h2>
-          {!videoFile ? (
-            <div
-                onDragEnter={(e) => handleDragEvents(e, true)}
-                onDragLeave={(e) => handleDragEvents(e, false)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDrop}
-                onClick={handleUploadClick}
-                className={`flex flex-col items-center justify-center p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 ${isDragging ? 'border-blue-400 bg-blue-900 bg-opacity-30' : 'border-gray-600 hover:border-blue-500 hover:bg-gray-700 bg-opacity-50'}`}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="video/*"
-                className="hidden"
-              />
-              <svg xmlns="http://www.w3.org/2000/svg" className={`h-16 w-16 mb-4 transition-colors duration-300 ${isDragging ? 'text-blue-300' : 'text-gray-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <p className="text-gray-300 text-center">
-                <span className="font-semibold text-blue-400">Click to upload</span> or drag and drop a video file.
-              </p>
-              <p className="text-xs text-gray-500 mt-2">MP4, MOV, AVI, etc.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Media Upload */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-center text-gray-200">1. Upload Media (Video/Audio)</h2>
+              {!videoFile ? (
+                <div
+                  onDragEnter={(e) => handleDragEvents(e, true)}
+                  onDragLeave={(e) => handleDragEvents(e, false)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  onClick={handleUploadClick}
+                  className={`flex flex-col items-center justify-center p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 ${
+                    isDragging ? 'border-blue-500 bg-blue-500 bg-opacity-10' : 'border-gray-600 hover:border-blue-500 hover:bg-gray-700 bg-opacity-50'
+                  } h-full min-h-[200px]`}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="video/*,audio/*"
+                    className="hidden"
+                  />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="text-gray-300 text-center"><span className="font-semibold text-blue-400">Click to upload</span> or drag and drop</p>
+                  <p className="text-xs text-gray-500 mt-2">MP4, WebM, MOV, MP3, WAV</p>
+                </div>
+              ) : (
+                <div className="bg-gray-700 rounded-lg p-4 flex flex-col justify-center h-full min-h-[200px]">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-3 overflow-hidden">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      <div className="truncate">
+                        <p className="text-gray-200 truncate font-medium" title={videoFile.name}>{videoFile.name}</p>
+                        <p className="text-xs text-gray-400">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={removeFile}
+                      className="p-2 rounded-full hover:bg-gray-600 transition-colors"
+                      title="Remove file"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 hover:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                  {videoFile.type.startsWith('video/') ? (
+                    <video 
+                      src={URL.createObjectURL(videoFile)} 
+                      className="w-full h-32 object-cover rounded bg-black"
+                      controls
+                    />
+                  ) : (
+                    <audio 
+                      src={URL.createObjectURL(videoFile)} 
+                      className="w-full mt-4"
+                      controls
+                    />
+                  )}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="bg-gray-700 rounded-lg p-4 flex items-center justify-between">
-                <div className="flex items-center space-x-3 overflow-hidden">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div className="truncate text-sm">
-                      <p className="text-gray-200 truncate font-mono" title={videoFile.name}>{videoFile.name}</p>
-                      {videoDuration !== null && <p className="text-gray-400 text-xs">Duration: {formatDuration(videoDuration)}</p>}
+
+            {/* Draft Upload */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-center text-gray-200">2. Upload Draft (.txt) (Optional)</h2>
+              {!draftFile ? (
+                <div
+                    onClick={() => draftInputRef.current?.click()}
+                    className={`flex flex-col items-center justify-center p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 border-gray-600 hover:border-purple-500 hover:bg-gray-700 bg-opacity-50 h-full min-h-[200px]`}
+                >
+                  <input type="file" ref={draftInputRef} onChange={handleDraftChange} accept=".txt,text/plain" className="hidden" />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-gray-300 text-center"><span className="font-semibold text-purple-400">Click to upload</span> a .txt draft.</p>
+                  <p className="text-xs text-gray-500 mt-2 text-center">1 line = 1 subtitle<br/>(Forces exact text matching)</p>
+                </div>
+              ) : (
+                <div className="bg-gray-700 rounded-lg p-4 flex flex-col justify-center h-full min-h-[200px]">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <div className="truncate">
+                              <p className="text-gray-200 truncate font-medium" title={draftFile.name}>{draftFile.name}</p>
+                              <p className="text-xs text-gray-400">{(draftFile.size / 1024).toFixed(2)} KB</p>
+                            </div>
+                        </div>
+                      <button onClick={removeDraft} className="p-2 rounded-full hover:bg-gray-600 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 hover:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded overflow-y-auto h-24 text-xs text-gray-300 font-mono whitespace-pre-wrap">
+                        {draftText?.substring(0, 200)}...
                     </div>
                 </div>
-              <button onClick={removeFile} className="p-1.5 rounded-full hover:bg-gray-600 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              )}
             </div>
-          )}
+          </div>
 
           {error && <p className="text-red-400 bg-red-900 bg-opacity-50 p-3 rounded-lg text-center">{error}</p>}
           
-          <div className="text-center">
+          <div className="flex flex-col sm:flex-row justify-center gap-4 mt-8">
             <button
               onClick={handleTranscribe}
               disabled={!videoFile || isLoading}
-              className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+              className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
             >
-              {isLoading ? 'Transcribing...' : 'Transcribe Video'}
+              {isLoading && !draftText ? 'Transcribing...' : 'Auto Transcribe'}
+            </button>
+            <button
+              onClick={handleAlignDraft}
+              disabled={!videoFile || !draftText || isLoading}
+              className="px-8 py-3 bg-gradient-to-r from-purple-500 to-purple-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
+              title={!draftText ? "Upload a draft .txt file first" : ""}
+            >
+              {isLoading && draftText ? 'Aligning...' : 'Transcribe from Draft'}
             </button>
           </div>
 
