@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
   const [retrySummary, setRetrySummary] = useState<{chunk: number, attempts: number, success: boolean}[]>([]);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
+  const [debugLogs, setDebugLogs] = useState<{ chunk: number; draftWindow: string; aiResponse: string }[]>([]);
   
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
@@ -156,6 +157,7 @@ const App: React.FC = () => {
     setTranscript(null);
     setCopySuccess('');
     setRetrySummary([]);
+    setDebugLogs([]);
     setShowSummaryModal(false);
 
     try {
@@ -169,6 +171,9 @@ const App: React.FC = () => {
           setSegments([]);
       } else if (typeof result !== 'string') {
           setTranscript(result.data);
+          if (result.debugLogs) {
+              setDebugLogs(result.debugLogs);
+          }
           
           const hasRetriesOrFailures = result.retryLog.some(log => log.attempts > 1 || !log.success);
           if (hasRetriesOrFailures) {
@@ -639,6 +644,34 @@ const App: React.FC = () => {
                   </pre>
                 )}
               </div>
+
+              {/* Debug Logs Section */}
+              {debugLogs.length > 0 && (
+                <div className="mt-8 bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <h3 className="text-xl font-bold text-blue-400 mb-4">Debug Logs (Chunk by Chunk)</h3>
+                  <div className="space-y-6">
+                    {debugLogs.map((log, idx) => (
+                      <div key={idx} className="bg-gray-900 rounded-lg p-4 border border-gray-700">
+                        <h4 className="text-lg font-semibold text-gray-200 mb-2">Chunk {log.chunk}</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <h5 className="text-sm font-bold text-purple-400 mb-1">Draft Window Sent</h5>
+                            <pre className="bg-black p-2 rounded text-xs text-gray-300 overflow-y-auto max-h-60 whitespace-pre-wrap">
+                              {log.draftWindow}
+                            </pre>
+                          </div>
+                          <div>
+                            <h5 className="text-sm font-bold text-green-400 mb-1">AI Response</h5>
+                            <pre className="bg-black p-2 rounded text-xs text-gray-300 overflow-y-auto max-h-60 whitespace-pre-wrap">
+                              {log.aiResponse}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </main>

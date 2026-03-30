@@ -185,6 +185,7 @@ const blobToBase64 = (blob: Blob): Promise<{ mimeType: string; data: string; }> 
 export interface TranscriptionResult {
   data: string;
   retryLog: { chunk: number; attempts: number; success: boolean }[];
+  debugLogs?: { chunk: number; draftWindow: string; aiResponse: string }[];
 }
 
 export const transcribeVideo = async (
@@ -470,6 +471,7 @@ export const alignDraftWithAudio = async (
     let chunks: Blob[] = [];
     let useChunking = true;
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
+    const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
     try {
         chunks = await extractAudioChunks(mediaFile, reportProgress);
@@ -495,34 +497,23 @@ export const alignDraftWithAudio = async (
             
             const audioPart = { inlineData: { mimeType, data: audioData } };
 
-            // Estimate where we should be based on time, in case the window gets stuck
-            const estimatedIndex = duration ? Math.floor(((i * chunkDuration) / duration) * lines.length) : 0;
-            
-            // Start from the last matched line, or the estimated index if we seem stuck (e.g., last match is way behind)
-            let windowStart = Math.max(0, lastMatchedLineIndex - 5);
-            if (estimatedIndex > windowStart + 20) {
-                // If our estimate is significantly ahead of our last match, it means we might be stuck
-                // (e.g., due to a long silence in the audio). Fast-forward the window.
-                windowStart = Math.max(0, estimatedIndex - 10);
-            }
+            const chunkDurationSec = 30;
+            const overlapSec = 3;
+            const isLastChunk = i === chunks.length - 1;
+            const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
-            let windowEnd = windowStart;
-            let currentLength = 0;
-            // Increased to 1500 to ensure we don't cut off text if speech is fast
-            while (windowEnd < lines.length && currentLength < 1500) {
-                currentLength += lines[windowEnd].length + 1; // +1 for newline
-                windowEnd++;
-            }
-            // Ensure we include at least a few lines if they are very long
-            if (windowEnd - windowStart < 5 && windowEnd < lines.length) {
-                windowEnd = Math.min(lines.length, windowStart + 5);
-            }
+            // Start from the last matched line
+            let windowStart = Math.max(0, lastMatchedLineIndex - 5);
+            
+            // 60 lines is extremely safe for 33 seconds of speech, even if they speak fast.
+            // This prevents the window from skipping text while keeping the payload small enough for the AI.
+            let windowEnd = Math.min(lines.length, windowStart + 60);
 
             const draftWindowLines = lines.slice(windowStart, windowEnd);
             const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
 
             let promptText = `You are an expert audio-text aligner.
-            I am providing an audio chunk (30 seconds long) and a section of the draft transcript.
+            I am providing an audio chunk (~${Math.round(actualChunkDuration)} seconds long) and a section of the draft transcript.
             
             DRAFT SECTION:
             ${draftFormattedWindow}
@@ -571,6 +562,7 @@ export const alignDraftWithAudio = async (
                     });
 
                     const resultText = response.text || "[]";
+                    debugLogs.push({ chunk: i + 1, draftWindow: draftFormattedWindow, aiResponse: resultText });
                     let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                     const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                     if (jsonMatch) jsonString = jsonMatch[0];
@@ -653,6 +645,7 @@ export const alignDraftWithAudio = async (
         });
 
         const resultText = response.text || "[]";
+        
         try {
             let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
             const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
@@ -753,7 +746,7 @@ export const alignDraftWithAudio = async (
         });
     }
 
-    return { data: JSON.stringify(finalSegments), retryLog };
+    return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 
   } catch (error) {
     console.error("Error aligning draft:", error);
