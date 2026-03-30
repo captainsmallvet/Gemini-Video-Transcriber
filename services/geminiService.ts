@@ -480,7 +480,7 @@ export const alignDraftWithAudio = async (
 
     const lines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) return "Error: Draft text is empty.";
-    const draftFormatted = lines.map((l, i) => `[${i}] ${l}`).join('\n');
+    const draftFormatted = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n');
 
     let chunks: Blob[] = [];
     let useChunking = true;
@@ -529,7 +529,7 @@ export const alignDraftWithAudio = async (
             let windowEnd = Math.min(lines.length, windowStart + estimatedLinesInChunk + lookaheadLines);
 
             const draftWindowLines = lines.slice(windowStart, windowEnd);
-            const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
+            const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx + 1}] ${l}`).join('\n');
 
             let promptText = `You are an expert audio-text aligner.
             I am providing an audio chunk (~${Math.round(actualChunkDuration)} seconds long) and a section of the draft transcript.
@@ -588,7 +588,11 @@ export const alignDraftWithAudio = async (
                     if (jsonMatch) jsonString = jsonMatch[0];
                     const parsedData = JSON.parse(jsonString);
                     if (Array.isArray(parsedData) && parsedData.length > 0) {
-                        parsed = parsedData;
+                        // Convert 1-based index back to 0-based index for internal logic
+                        parsed = parsedData.map(item => ({
+                            ...item,
+                            lineIndex: item.lineIndex - 1
+                        }));
                     }
                 } catch (e) {
                     console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
@@ -679,7 +683,7 @@ export const alignDraftWithAudio = async (
         1. You MUST include EVERY line from the draft. Do not skip any lines.
         2. 'lineIndex' MUST match the index in the draft exactly.
         3. 'start' MUST be the exact start time in seconds (e.g., 14.5).
-        4. Return ONLY valid JSON in this format: [{"lineIndex": 0, "start": 2.1}, {"lineIndex": 1, "start": 5.4}]
+        4. Return ONLY valid JSON in this format: [{"lineIndex": 1, "start": 2.1}, {"lineIndex": 2, "start": 5.4}]
         `;
 
         reportProgress("Generating alignment...");
@@ -717,7 +721,7 @@ export const alignDraftWithAudio = async (
             const parsed = JSON.parse(jsonString);
             if (Array.isArray(parsed)) {
                 parsed.forEach(seg => {
-                    aligned.set(seg.lineIndex, parseTime(seg.start));
+                    aligned.set(seg.lineIndex - 1, parseTime(seg.start));
                 });
             }
         } catch (e) {
