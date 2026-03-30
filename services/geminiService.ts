@@ -495,10 +495,21 @@ export const alignDraftWithAudio = async (
             
             const audioPart = { inlineData: { mimeType, data: audioData } };
 
-            const windowStart = Math.max(0, lastMatchedLineIndex - 5);
+            // Estimate where we should be based on time, in case the window gets stuck
+            const estimatedIndex = duration ? Math.floor(((i * chunkDuration) / duration) * lines.length) : 0;
+            
+            // Start from the last matched line, or the estimated index if we seem stuck (e.g., last match is way behind)
+            let windowStart = Math.max(0, lastMatchedLineIndex - 5);
+            if (estimatedIndex > windowStart + 20) {
+                // If our estimate is significantly ahead of our last match, it means we might be stuck
+                // (e.g., due to a long silence in the audio). Fast-forward the window.
+                windowStart = Math.max(0, estimatedIndex - 10);
+            }
+
             let windowEnd = windowStart;
             let currentLength = 0;
-            while (windowEnd < lines.length && currentLength < 800) {
+            // Increased to 1500 to ensure we don't cut off text if speech is fast
+            while (windowEnd < lines.length && currentLength < 1500) {
                 currentLength += lines[windowEnd].length + 1; // +1 for newline
                 windowEnd++;
             }
