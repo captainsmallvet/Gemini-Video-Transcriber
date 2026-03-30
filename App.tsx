@@ -20,6 +20,13 @@ const App: React.FC = () => {
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<{ chunk: number; draftWindow: string; aiResponse: string }[]>([]);
   
+  // Configuration Settings
+  const [chunkLength, setChunkLength] = useState<number>(60);
+  const [overlapTime, setOverlapTime] = useState<number>(15);
+  const [delayTime, setDelayTime] = useState<number>(3);
+  const [lookaheadLines, setLookaheadLines] = useState<number>(5);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+  
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
   const models = [
@@ -161,9 +168,10 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines };
       const result = await alignDraftWithAudio(videoFile, draftText, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
-      });
+      }, options);
       
       if (typeof result === 'string' && result.startsWith('Error:')) {
           setError(result);
@@ -227,9 +235,10 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines };
       const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
-      });
+      }, options);
       
       if (typeof result === 'string' && result.startsWith('Error:')) {
           setError(result);
@@ -548,6 +557,60 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Advanced Settings Toggle */}
+          <div className="border-t border-gray-700 pt-4 mt-6">
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className="flex items-center space-x-2 text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transform transition-transform ${showSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              <span>Advanced Settings (Chunking & Alignment)</span>
+            </button>
+            
+            {showSettings && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-4 bg-gray-900 bg-opacity-50 p-4 rounded-lg border border-gray-700">
+                <div className="flex flex-col space-y-1">
+                  <label className="text-xs text-gray-400 font-semibold">Chunk Length (sec)</label>
+                  <input 
+                    type="number" 
+                    value={chunkLength} 
+                    onChange={(e) => setChunkLength(Number(e.target.value))}
+                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                  />
+                </div>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-xs text-gray-400 font-semibold">Overlap Time (sec)</label>
+                  <input 
+                    type="number" 
+                    value={overlapTime} 
+                    onChange={(e) => setOverlapTime(Number(e.target.value))}
+                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                  />
+                </div>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-xs text-gray-400 font-semibold">Delay Between Chunks (sec)</label>
+                  <input 
+                    type="number" 
+                    value={delayTime} 
+                    onChange={(e) => setDelayTime(Number(e.target.value))}
+                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                  />
+                </div>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-xs text-gray-400 font-semibold">Lookahead Lines (Draft)</label>
+                  <input 
+                    type="number" 
+                    value={lookaheadLines} 
+                    onChange={(e) => setLookaheadLines(Number(e.target.value))}
+                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {error && <p className="text-red-400 bg-red-900 bg-opacity-50 p-3 rounded-lg text-center">{error}</p>}

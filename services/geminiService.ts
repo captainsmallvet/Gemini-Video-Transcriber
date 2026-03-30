@@ -123,7 +123,12 @@ function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
     return new Blob([view], { type: 'audio/wav' });
 }
 
-async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => void): Promise<Blob[]> {
+async function extractAudioChunks(
+    videoFile: File, 
+    onProgress: (msg: string) => void,
+    chunkDurationSec: number = 30,
+    overlapSec: number = 3
+): Promise<Blob[]> {
     onProgress("Extracting audio from video (this may take a moment for large files)...");
     const arrayBuffer = await videoFile.arrayBuffer();
     
@@ -137,12 +142,10 @@ async function extractAudioChunks(videoFile: File, onProgress: (msg: string) => 
     onProgress("Decoding audio data...");
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-    const CHUNK_DURATION_SEC = 30; // 30 seconds core chunk to prevent AI timestamp interpolation drift
-    const OVERLAP_SEC = 3; // 3 seconds overlap
     const sampleRate = audioBuffer.sampleRate;
     const totalLength = audioBuffer.length;
-    const chunkLength = CHUNK_DURATION_SEC * sampleRate;
-    const overlapLength = OVERLAP_SEC * sampleRate;
+    const chunkLength = chunkDurationSec * sampleRate;
+    const overlapLength = overlapSec * sampleRate;
     const chunks: Blob[] = [];
 
     // Mixdown to mono (use channel 0)
@@ -188,12 +191,20 @@ export interface TranscriptionResult {
   debugLogs?: { chunk: number; draftWindow: string; aiResponse: string }[];
 }
 
+export interface TranscriptionOptions {
+  chunkLength?: number;
+  overlapTime?: number;
+  delayTime?: number;
+  lookaheadLines?: number;
+}
+
 export const transcribeVideo = async (
   videoFile: File, 
   duration: number | null, 
   apiKey: string,
   modelName: string = 'gemini-3-flash-preview',
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  options?: TranscriptionOptions
 ): Promise<TranscriptionResult | string> => {
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
@@ -208,7 +219,9 @@ export const transcribeVideo = async (
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
 
     try {
-        chunks = await extractAudioChunks(videoFile, reportProgress);
+        const chunkDurationSec = options?.chunkLength || 30;
+        const overlapSec = options?.overlapTime || 3;
+        chunks = await extractAudioChunks(videoFile, reportProgress, chunkDurationSec, overlapSec);
     } catch (audioErr) {
         console.warn("Audio extraction failed, falling back to full video upload.", audioErr);
         useChunking = false;
@@ -216,12 +229,14 @@ export const transcribeVideo = async (
 
     if (useChunking && chunks.length > 0) {
         let allSegments: any[] = [];
-        const chunkDuration = 30; // 30 seconds
+        const chunkDurationSec = options?.chunkLength || 30;
+        const overlapSec = options?.overlapTime || 3;
+        const delayMs = (options?.delayTime || 3) * 1000;
 
         for (let i = 0; i < chunks.length; i++) {
-            if (i > 0) {
-                reportProgress(`Waiting 3 seconds before processing chunk ${i + 1}...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
+            if (i > 0 && delayMs > 0) {
+                reportProgress(`Waiting ${options?.delayTime || 3} seconds before processing chunk ${i + 1}...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
             }
             reportProgress(`Transcribing part ${i + 1} of ${chunks.length}...`);
             const chunkBlob = chunks[i];
@@ -234,8 +249,6 @@ export const transcribeVideo = async (
               },
             };
 
-            const chunkDurationSec = 30;
-            const overlapSec = 3;
             const isLastChunk = i === chunks.length - 1;
             // The actual duration of the audio blob includes the overlap (except for the last chunk)
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
@@ -316,7 +329,7 @@ export const transcribeVideo = async (
 
             if (parsed.length > 0) {
                 retryLog.push({ chunk: i + 1, attempts, success: true });
-                const timeOffset = i * chunkDuration;
+                const timeOffset = i * chunkDurationSec;
                     
                     // We no longer filter out the overlap region blindly, as it caused missing segments.
                     // Instead, we keep all segments and let cleanSegments handle deduplication.
@@ -340,8 +353,8 @@ export const transcribeVideo = async (
                 retryLog.push({ chunk: i + 1, attempts, success: false });
                 reportProgress(`Warning: Chunk ${i + 1} failed completely. Inserting placeholder.`);
                 allSegments.push({
-                    start: i * chunkDuration,
-                    end: (i * chunkDuration) + 5,
+                    start: i * chunkDurationSec,
+                    end: (i * chunkDurationSec) + 5,
                     text: "[ระบบ AI ขัดข้อง: ไม่สามารถถอดความเสียงในช่วงเวลานี้ได้]"
                 });
             }
@@ -455,7 +468,8 @@ export const alignDraftWithAudio = async (
   duration: number | null, 
   apiKey: string,
   modelName: string = 'gemini-3-flash-preview',
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  options?: TranscriptionOptions
 ): Promise<TranscriptionResult | string> => {
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
@@ -474,7 +488,9 @@ export const alignDraftWithAudio = async (
     const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
     try {
-        chunks = await extractAudioChunks(mediaFile, reportProgress);
+        const chunkDurationSec = options?.chunkLength || 60;
+        const overlapSec = options?.overlapTime || 15;
+        chunks = await extractAudioChunks(mediaFile, reportProgress, chunkDurationSec, overlapSec);
     } catch (audioErr) {
         console.warn("Audio extraction failed, falling back to full media upload.", audioErr);
         useChunking = false;
@@ -483,13 +499,17 @@ export const alignDraftWithAudio = async (
     const aligned = new Map<number, number>();
 
     if (useChunking && chunks.length > 0) {
-        const chunkDuration = 30; // 30 seconds
+        const chunkDurationSec = options?.chunkLength || 60;
+        const overlapSec = options?.overlapTime || 15;
+        const delayMs = (options?.delayTime || 3) * 1000;
+        const lookaheadLines = options?.lookaheadLines || 5;
+        
         let lastMatchedLineIndex = -1;
 
         for (let i = 0; i < chunks.length; i++) {
-            if (i > 0) {
-                reportProgress(`Waiting 3 seconds before processing chunk ${i + 1}...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
+            if (i > 0 && delayMs > 0) {
+                reportProgress(`Waiting ${options?.delayTime || 3} seconds before processing chunk ${i + 1}...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
             }
             reportProgress(`Aligning part ${i + 1} of ${chunks.length}...`);
             const chunkBlob = chunks[i];
@@ -497,17 +517,16 @@ export const alignDraftWithAudio = async (
             
             const audioPart = { inlineData: { mimeType, data: audioData } };
 
-            const chunkDurationSec = 30;
-            const overlapSec = 3;
             const isLastChunk = i === chunks.length - 1;
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
             // Start from the last matched line
-            let windowStart = Math.max(0, lastMatchedLineIndex - 5);
+            let windowStart = Math.max(0, lastMatchedLineIndex - 2); // Overlap a bit with previous chunk's matched lines
             
-            // 60 lines is extremely safe for 33 seconds of speech, even if they speak fast.
-            // This prevents the window from skipping text while keeping the payload small enough for the AI.
-            let windowEnd = Math.min(lines.length, windowStart + 60);
+            // Send enough lines to cover the chunk duration, plus lookahead
+            // Assuming average 2-3 seconds per line, chunkDurationSec / 2 is a safe upper bound for lines in a chunk
+            let estimatedLinesInChunk = Math.ceil(chunkDurationSec / 2);
+            let windowEnd = Math.min(lines.length, windowStart + estimatedLinesInChunk + lookaheadLines);
 
             const draftWindowLines = lines.slice(windowStart, windowEnd);
             const draftFormattedWindow = draftWindowLines.map((l, idx) => `[${windowStart + idx}] ${l}`).join('\n');
@@ -525,8 +544,9 @@ export const alignDraftWithAudio = async (
             1. You MUST include EVERY line from the draft that you hear in this chunk. Do not skip any lines.
             2. 'lineIndex' MUST match the index in the draft exactly as shown in the brackets (e.g., [28] -> 28).
             3. 'start' MUST be the exact start time in seconds (e.g., 14.5) relative to the beginning of this chunk.
-            4. If a line is partially in this chunk, include it.
-            5. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 5.4}]
+            4. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
+            5. If a line is partially in this chunk, include it.
+            6. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 5.4}]
             `;
 
             let parsed: any[] = [];
@@ -578,17 +598,61 @@ export const alignDraftWithAudio = async (
 
             if (parsed.length > 0) {
                 retryLog.push({ chunk: i + 1, attempts, success: true });
-                const timeOffset = i * chunkDuration;
+                const timeOffset = i * chunkDurationSec;
+                
+                // Post-processing: Check for unrealistically short durations between lines
+                // and discard edges (trust the middle)
+                let validParsed = parsed;
+                
+                // If not the first chunk, discard the first few lines (edge effect)
+                // if they overlap with the previous chunk's matched lines.
+                if (i > 0) {
+                    validParsed = validParsed.filter(seg => {
+                        // If it's at the very beginning of the chunk (e.g., < 1.0s) and we already matched it
+                        // or it's a very early line, we might want to trust the previous chunk's timing more.
+                        if (parseTime(seg.start) < 1.0 && aligned.has(seg.lineIndex)) {
+                            return false; // Discard edge from new chunk, trust previous chunk
+                        }
+                        return true;
+                    });
+                }
+
                 let maxIndexInChunk = -1;
-                parsed.forEach(seg => {
+                validParsed.forEach((seg, idx) => {
                     const globalStart = parseTime(seg.start) + timeOffset;
-                    if (!aligned.has(seg.lineIndex)) {
-                        aligned.set(seg.lineIndex, globalStart);
+                    
+                    // Post-processing: Prevent N-gram collision / unrealistically short gaps
+                    let isValid = true;
+                    if (idx > 0) {
+                        const prevSeg = validParsed[idx - 1];
+                        const timeDiff = parseTime(seg.start) - parseTime(prevSeg.start);
+                        const prevLineText = lines[prevSeg.lineIndex] || "";
+                        
+                        // Calculate minimum expected duration based on character count of the PREVIOUS line
+                        // Average speaking rate is ~15 chars/sec. We use 25 chars/sec as a very fast bound (0.04s per char).
+                        // We also enforce an absolute minimum gap of 0.15s for any line, unless it's extremely short.
+                        const minExpectedDuration = Math.max(0.15, prevLineText.length * 0.04);
+                        
+                        if (timeDiff < minExpectedDuration && timeDiff >= 0) {
+                            // The gap is too short for the amount of text in the previous line.
+                            // This indicates the AI is hallucinating timestamps (e.g., 0.1s increments).
+                            isValid = false;
+                            console.warn(`[Chunk ${i+1}] Discarding line ${seg.lineIndex} due to short gap. Prev line: "${prevLineText}" (${prevLineText.length} chars). Gap: ${timeDiff}s, Min expected: ${minExpectedDuration}s`);
+                        }
                     }
-                    if (seg.lineIndex > maxIndexInChunk) {
-                        maxIndexInChunk = seg.lineIndex;
+
+                    if (isValid) {
+                        // If we already have it, only overwrite if the new one is NOT at the edge (start < 1.0)
+                        // This implements "trust the middle"
+                        if (!aligned.has(seg.lineIndex) || parseTime(seg.start) >= 1.0) {
+                            aligned.set(seg.lineIndex, globalStart);
+                        }
+                        if (seg.lineIndex > maxIndexInChunk) {
+                            maxIndexInChunk = seg.lineIndex;
+                        }
                     }
                 });
+                
                 if (maxIndexInChunk > lastMatchedLineIndex) {
                     lastMatchedLineIndex = maxIndexInChunk;
                 }
