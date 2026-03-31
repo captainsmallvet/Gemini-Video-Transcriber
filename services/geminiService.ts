@@ -584,12 +584,14 @@ export const alignDraftWithAudio = async (
             const isLastChunk = i === chunks.length - 1;
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
-            // Start from the last matched line
-            let windowStart = Math.max(0, lastMatchedLineIndex - 2); // Overlap a bit with previous chunk's matched lines
+            // Calculate how many lines to go back to cover the overlap region.
+            // Assuming an average of 2 seconds per line, we go back overlapSec / 2 lines, plus a small buffer.
+            const overlapLines = Math.ceil(overlapSec / 2) + 2;
+            let windowStart = Math.max(0, lastMatchedLineIndex - overlapLines);
             
             // Send enough lines to cover the chunk duration, plus lookahead
-            // Assuming average 2-3 seconds per line, chunkDurationSec / 2 is a safe upper bound for lines in a chunk
-            let estimatedLinesInChunk = Math.ceil(chunkDurationSec / 2);
+            // Assuming average 2 seconds per line, actualChunkDuration / 2 is a safe upper bound
+            let estimatedLinesInChunk = Math.ceil(actualChunkDuration / 2);
             let windowEnd = Math.min(lines.length, windowStart + estimatedLinesInChunk + lookaheadLines);
 
             const draftWindowLines = lines.slice(windowStart, windowEnd);
