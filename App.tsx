@@ -387,7 +387,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 text-white flex flex-col items-center">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 text-white flex flex-col items-center overscroll-none">
       
       {/* Top Panel: API Key & Model Selection */}
       <div className="w-full bg-gray-800 bg-opacity-90 backdrop-blur-md border-b border-gray-700 p-2 sticky top-0 z-50 shadow-xl">
