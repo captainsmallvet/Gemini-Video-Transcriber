@@ -21,8 +21,8 @@ const App: React.FC = () => {
   const [debugLogs, setDebugLogs] = useState<{ chunk: number; draftWindow: string; aiResponse: string }[]>([]);
   
   // Configuration Settings
-  const [chunkLength, setChunkLength] = useState<number>(300);
-  const [overlapTime, setOverlapTime] = useState<number>(45);
+  const [chunkLength, setChunkLength] = useState<number>(90);
+  const [overlapTime, setOverlapTime] = useState<number>(30);
   const [delayTime, setDelayTime] = useState<number>(3);
   const [lookaheadLines, setLookaheadLines] = useState<number>(5);
   const [showSettings, setShowSettings] = useState<boolean>(false);
