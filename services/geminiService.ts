@@ -30,6 +30,70 @@ const parseTime = (time: any): number => {
     return 0;
 };
 
+const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): any[] => {
+    let prevTime = 0;
+    const maxAllowedTime = actualChunkDuration + 15; // 15s buffer
+
+    const correctedData = parsedData.map(item => {
+        let start = parseTime(item.start);
+        
+        // Auto-correct M:SS format hallucinated as MSS.ms (e.g., 102.5 -> 62.5)
+        if (start >= 100 && start > maxAllowedTime) {
+            const mins = Math.floor(start / 100);
+            const secs = start % 100;
+            const corrected = (mins * 60) + secs;
+            if (corrected <= maxAllowedTime) {
+                start = corrected;
+            }
+        }
+        
+        // Auto-correct M.SS format hallucinated as M.SS (e.g., 1.06 -> 66.0)
+        if (start < 10 && prevTime > 30) {
+            const mins = Math.floor(start);
+            const secs = Math.round((start - mins) * 100);
+            const corrected = (mins * 60) + secs;
+            if (corrected > prevTime && corrected <= maxAllowedTime) {
+                start = corrected;
+            }
+        }
+
+        let end = item.end !== undefined ? parseTime(item.end) : undefined;
+        if (end !== undefined) {
+            if (end >= 100 && end > maxAllowedTime) {
+                const mins = Math.floor(end / 100);
+                const secs = end % 100;
+                const corrected = (mins * 60) + secs;
+                if (corrected <= maxAllowedTime) {
+                    end = corrected;
+                }
+            }
+            if (end < 10 && start > 30) {
+                const mins = Math.floor(end);
+                const secs = Math.round((end - mins) * 100);
+                const corrected = (mins * 60) + secs;
+                if (corrected > start && corrected <= maxAllowedTime) {
+                    end = corrected;
+                }
+            }
+        }
+
+        prevTime = start;
+        return {
+            ...item,
+            start,
+            ...(end !== undefined && { end })
+        };
+    });
+
+    // Validate bounds
+    const hasOutOfBounds = correctedData.some(item => item.start > maxAllowedTime || item.start < 0);
+    if (hasOutOfBounds) {
+        throw new Error(`AI generated timestamps out of bounds for chunk duration ${actualChunkDuration}. Forcing retry.`);
+    }
+
+    return correctedData;
+};
+
 const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
@@ -263,7 +327,7 @@ export const transcribeVideo = async (
             3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
             4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
             5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
-            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format.
+            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. If a word is spoken at second 45, its timestamp MUST be around 45. You MUST align the text with the ACTUAL audio timing.
             8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             `;
@@ -319,7 +383,7 @@ export const transcribeVideo = async (
                     }
                     const parsedData = JSON.parse(jsonString);
                     if (Array.isArray(parsedData) && parsedData.length > 0) {
-                        parsed = parsedData;
+                        parsed = normalizeTimestamps(parsedData, actualChunkDuration);
                     }
                 } catch (e) {
                     console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
@@ -543,10 +607,10 @@ export const alignDraftWithAudio = async (
             CRITICAL RULES:
             1. You MUST include EVERY line from the draft that you hear in this chunk. Do not skip any lines.
             2. 'lineIndex' MUST match the index in the draft exactly as shown in the brackets (e.g., [28] -> 28).
-            3. 'start' MUST be the exact start time in seconds (e.g., 14.5) relative to the beginning of this chunk.
+            3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5) relative to the beginning of this chunk. DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             4. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
             5. If a line is partially in this chunk, include it.
-            6. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 5.4}]
+            6. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 62.5}]
             `;
 
             let parsed: any[] = [];
@@ -588,8 +652,11 @@ export const alignDraftWithAudio = async (
                     if (jsonMatch) jsonString = jsonMatch[0];
                     const parsedData = JSON.parse(jsonString);
                     if (Array.isArray(parsedData) && parsedData.length > 0) {
+                        // Normalize timestamps to handle AI hallucinations (e.g., 102.5 -> 62.5)
+                        const normalizedData = normalizeTimestamps(parsedData, actualChunkDuration);
+                        
                         // Convert 1-based index back to 0-based index for internal logic
-                        parsed = parsedData.map(item => ({
+                        parsed = normalizedData.map(item => ({
                             ...item,
                             lineIndex: item.lineIndex - 1
                         }));
@@ -682,8 +749,8 @@ export const alignDraftWithAudio = async (
         CRITICAL RULES:
         1. You MUST include EVERY line from the draft. Do not skip any lines.
         2. 'lineIndex' MUST match the index in the draft exactly.
-        3. 'start' MUST be the exact start time in seconds (e.g., 14.5).
-        4. Return ONLY valid JSON in this format: [{"lineIndex": 1, "start": 2.1}, {"lineIndex": 2, "start": 5.4}]
+        3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
+        4. Return ONLY valid JSON in this format: [{"lineIndex": 1, "start": 2.1}, {"lineIndex": 2, "start": 62.5}]
         `;
 
         reportProgress("Generating alignment...");
