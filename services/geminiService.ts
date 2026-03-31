@@ -91,6 +91,35 @@ const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): an
         throw new Error(`AI generated timestamps out of bounds for chunk duration ${actualChunkDuration}. Forcing retry.`);
     }
 
+    // Validate if timestamps are too compressed (impossible speech rate)
+    if (correctedData.length > 5) {
+        const minTime = Math.min(...correctedData.map(item => item.start));
+        const maxTime = Math.max(...correctedData.map(item => item.start));
+        const timeSpan = maxTime - minTime;
+        
+        // If average time per line is less than 0.2 seconds, it's highly likely hallucinated
+        if (timeSpan < correctedData.length * 0.2) {
+            throw new Error(`AI generated timestamps are too compressed (${timeSpan.toFixed(2)}s for ${correctedData.length} lines). Forcing retry.`);
+        }
+    }
+
+    // Validate severe backwards jumps
+    let significantBackwardsJumps = 0;
+    let totalBackwardsJumps = 0;
+    for (let i = 1; i < correctedData.length; i++) {
+        if (correctedData[i-1].start > correctedData[i].start) {
+            totalBackwardsJumps++;
+            // A jump backwards of more than 2 seconds is highly suspicious
+            if (correctedData[i-1].start - correctedData[i].start > 2) {
+                significantBackwardsJumps++;
+            }
+        }
+    }
+    
+    if (significantBackwardsJumps > 0 || totalBackwardsJumps > 3) {
+        throw new Error(`AI generated timestamps contain backwards jumps (${totalBackwardsJumps} total, ${significantBackwardsJumps} severe). Forcing retry.`);
+    }
+
     return correctedData;
 };
 
