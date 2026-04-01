@@ -289,6 +289,7 @@ export interface TranscriptionOptions {
   overlapTime?: number;
   delayTime?: number;
   lookaheadLines?: number;
+  useVideoOcr?: boolean;
 }
 
 export const transcribeVideo = async (
@@ -308,16 +309,18 @@ export const transcribeVideo = async (
     };
 
     let chunks: Blob[] = [];
-    let useChunking = true;
+    let useChunking = !options?.useVideoOcr;
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
 
-    try {
-        const chunkDurationSec = options?.chunkLength || 30;
-        const overlapSec = options?.overlapTime || 3;
-        chunks = await extractAudioChunks(videoFile, reportProgress, chunkDurationSec, overlapSec);
-    } catch (audioErr) {
-        console.warn("Audio extraction failed, falling back to full video upload.", audioErr);
-        useChunking = false;
+    if (useChunking) {
+        try {
+            const chunkDurationSec = options?.chunkLength || 30;
+            const overlapSec = options?.overlapTime || 3;
+            chunks = await extractAudioChunks(videoFile, reportProgress, chunkDurationSec, overlapSec);
+        } catch (audioErr) {
+            console.warn("Audio extraction failed, falling back to full video upload.", audioErr);
+            useChunking = false;
+        }
     }
 
     if (useChunking && chunks.length > 0) {
@@ -470,7 +473,7 @@ export const transcribeVideo = async (
     };
 
     let promptText = `You are a professional video subtitler.
-    Task: Transcribe the speech in this video verbatim from beginning to end.
+    Task: ${options?.useVideoOcr ? "Read the burned-in subtitles on the video frames AND transcribe the speech" : "Transcribe the speech in this video"} verbatim from beginning to end.
     
     CRITICAL RULES:
     1. TRANSCRIBE THE ENTIRE AUDIO CHRONOLOGICALLY. Do not stop early.
@@ -481,6 +484,7 @@ export const transcribeVideo = async (
     6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format.
     7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. You MUST align the text with the ACTUAL audio timing.
     8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+    ${options?.useVideoOcr ? "9. Use the burned-in subtitles on the video as your primary source for exact timing and content. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
     `;
 
     const textPart = {
@@ -576,17 +580,19 @@ export const alignDraftWithAudio = async (
     const draftFormatted = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n');
 
     let chunks: Blob[] = [];
-    let useChunking = true;
+    let useChunking = !options?.useVideoOcr;
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
     const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
-    try {
-        const chunkDurationSec = options?.chunkLength || 60;
-        const overlapSec = options?.overlapTime || 15;
-        chunks = await extractAudioChunks(mediaFile, reportProgress, chunkDurationSec, overlapSec);
-    } catch (audioErr) {
-        console.warn("Audio extraction failed, falling back to full media upload.", audioErr);
-        useChunking = false;
+    if (useChunking) {
+        try {
+            const chunkDurationSec = options?.chunkLength || 60;
+            const overlapSec = options?.overlapTime || 15;
+            chunks = await extractAudioChunks(mediaFile, reportProgress, chunkDurationSec, overlapSec);
+        } catch (audioErr) {
+            console.warn("Audio extraction failed, falling back to full media upload.", audioErr);
+            useChunking = false;
+        }
     }
 
     const aligned = new Map<number, number>();
@@ -774,14 +780,14 @@ export const alignDraftWithAudio = async (
         FULL DRAFT:
         ${draftFormatted}
 
-        Task: Listen to the media carefully. Identify the exact start time for EVERY SINGLE LINE in the draft.
+        Task: ${options?.useVideoOcr ? "Read the burned-in subtitles on the video frames AND listen to the audio" : "Listen to the media carefully"}. Identify the exact start time for EVERY SINGLE LINE in the draft.
         Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the draft. Do not skip any lines.
         2. 'lineIndex' MUST match the index in the draft exactly.
         3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
-        4. Return ONLY valid JSON in this format: [{"lineIndex": 1, "start": 2.1}, {"lineIndex": 2, "start": 62.5}]
+        ${options?.useVideoOcr ? "4. Use the burned-in subtitles on the video as your primary source for exact timing. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n        5. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]" : "4. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]"}
         `;
 
         reportProgress("Generating alignment...");

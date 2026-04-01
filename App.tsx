@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const [overlapTime, setOverlapTime] = useState<number>(30);
   const [delayTime, setDelayTime] = useState<number>(3);
   const [lookaheadLines, setLookaheadLines] = useState<number>(5);
+  const [useVideoOcr, setUseVideoOcr] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   
   // Model Selection State
@@ -152,6 +153,11 @@ const App: React.FC = () => {
   const handleAlignDraft = async () => {
     if (!videoFile || !draftText) return;
     
+    if (useVideoOcr && videoFile.size > 20 * 1024 * 1024) {
+      setError('Error: Video file is too large for OCR alignment. Max size is 20MB. Please disable "Use Video Subtitles (OCR)" or use a smaller video.');
+      return;
+    }
+
     const keyToUse = activeApiKey || process.env.API_KEY;
     if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
       setError('Error: No API Key set. Please enter your API key in the top field and click "send".');
@@ -168,7 +174,7 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr };
       const result = await alignDraftWithAudio(videoFile, draftText, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -220,6 +226,11 @@ const App: React.FC = () => {
   const handleTranscribe = async () => {
     if (!videoFile) return;
     
+    if (useVideoOcr && videoFile.size > 20 * 1024 * 1024) {
+      setError('Error: Video file is too large for OCR transcription. Max size is 20MB. Please disable "Use Video Subtitles (OCR)" or use a smaller video.');
+      return;
+    }
+
     const keyToUse = activeApiKey || process.env.API_KEY;
     if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
       setError('Error: No API Key set. Please enter your API key in the top field and click "send".');
@@ -235,7 +246,7 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr };
       const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -572,44 +583,60 @@ const App: React.FC = () => {
             </button>
             
             {showSettings && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-4 bg-gray-900 bg-opacity-50 p-4 rounded-lg border border-gray-700">
-                <div className="flex flex-col space-y-1">
-                  <label className="text-xs text-gray-400 font-semibold">Chunk Length (sec)</label>
-                  <input 
-                    type="number" 
-                    value={chunkLength} 
-                    onChange={(e) => setChunkLength(Number(e.target.value))}
-                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
-                  />
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-4 bg-gray-900 bg-opacity-50 p-4 rounded-lg border border-gray-700">
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Chunk Length (sec)</label>
+                    <input 
+                      type="number" 
+                      value={chunkLength} 
+                      onChange={(e) => setChunkLength(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Overlap Time (sec)</label>
+                    <input 
+                      type="number" 
+                      value={overlapTime} 
+                      onChange={(e) => setOverlapTime(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Delay Between Chunks (sec)</label>
+                    <input 
+                      type="number" 
+                      value={delayTime} 
+                      onChange={(e) => setDelayTime(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Lookahead Lines (Draft)</label>
+                    <input 
+                      type="number" 
+                      value={lookaheadLines} 
+                      onChange={(e) => setLookaheadLines(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col space-y-1">
-                  <label className="text-xs text-gray-400 font-semibold">Overlap Time (sec)</label>
-                  <input 
-                    type="number" 
-                    value={overlapTime} 
-                    onChange={(e) => setOverlapTime(Number(e.target.value))}
-                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div className="flex flex-col space-y-1">
-                  <label className="text-xs text-gray-400 font-semibold">Delay Between Chunks (sec)</label>
-                  <input 
-                    type="number" 
-                    value={delayTime} 
-                    onChange={(e) => setDelayTime(Number(e.target.value))}
-                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div className="flex flex-col space-y-1">
-                  <label className="text-xs text-gray-400 font-semibold">Lookahead Lines (Draft)</label>
-                  <input 
-                    type="number" 
-                    value={lookaheadLines} 
-                    onChange={(e) => setLookaheadLines(Number(e.target.value))}
-                    className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
-                  />
-                </div>
-              </div>
+                {videoFile && videoFile.type.startsWith('video/') && (
+                  <div className="mt-4 flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="useVideoOcr"
+                      checked={useVideoOcr}
+                      onChange={(e) => setUseVideoOcr(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 bg-gray-800 border-gray-700 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                    <label htmlFor="useVideoOcr" className="text-sm text-gray-300">
+                      Use Video Subtitles (OCR) for Alignment (Max 20MB, disables chunking)
+                    </label>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
