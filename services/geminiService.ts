@@ -384,7 +384,7 @@ export const transcribeVideo = async (
             6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. If a word is spoken at second 45, its timestamp MUST be around 45. You MUST align the text with the ACTUAL audio timing.
             8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
-            ${options?.useVideoOcr ? "9. Use the burned-in subtitles on the video as your primary source for exact timing and content. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
+            ${options?.useVideoOcr ? "9. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time of the speech. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
             `;
 
             const textPart = { text: promptText };
@@ -513,7 +513,7 @@ export const transcribeVideo = async (
     6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format.
     7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. You MUST align the text with the ACTUAL audio timing.
     8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
-    ${options?.useVideoOcr ? "9. Use the burned-in subtitles on the video as your primary source for exact timing and content. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
+    ${options?.useVideoOcr ? "9. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time of the speech. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
     `;
 
     const textPart = {
@@ -697,7 +697,7 @@ export const alignDraftWithAudio = async (
             3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5) relative to the beginning of this chunk. DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             4. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
             5. If a line is partially in this chunk, include it.
-            ${options?.useVideoOcr ? "6. Use the burned-in subtitles on the video as your primary source for exact timing. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n            7. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]" : "6. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]"}
+            ${options?.useVideoOcr ? "6. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n            7. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]" : "6. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]"}
             `;
 
             const textPart = { text: promptText };
@@ -848,7 +848,7 @@ export const alignDraftWithAudio = async (
         1. You MUST include EVERY line from the draft. Do not skip any lines.
         2. 'lineIndex' MUST match the index in the draft exactly.
         3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
-        ${options?.useVideoOcr ? "4. Use the burned-in subtitles on the video as your primary source for exact timing. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n        5. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]" : "4. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]"}
+        ${options?.useVideoOcr ? "4. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n        5. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]" : "4. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]"}
         `;
 
         reportProgress("Generating alignment...");
