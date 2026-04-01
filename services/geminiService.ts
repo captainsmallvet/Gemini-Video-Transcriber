@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { fileToBase64 } from '../utils/fileUtils';
+import { extractVideoFramesForChunk } from '../utils/videoUtils';
 
 const formatDurationForPrompt = (seconds: number): string => {
     if (isNaN(seconds) || seconds < 0) return '';
@@ -309,7 +310,7 @@ export const transcribeVideo = async (
     };
 
     let chunks: Blob[] = [];
-    let useChunking = !options?.useVideoOcr;
+    let useChunking = true; // Always use chunking by default
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
 
     if (useChunking) {
@@ -349,8 +350,29 @@ export const transcribeVideo = async (
             // The actual duration of the audio blob includes the overlap (except for the last chunk)
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
+            let parts: any[] = [audioPart];
+
+            if (options?.useVideoOcr && videoFile.type.startsWith('video/')) {
+                reportProgress(`Extracting video frames for part ${i + 1}...`);
+                const startTimeSec = i * chunkDurationSec;
+                const endTimeSec = startTimeSec + actualChunkDuration;
+                try {
+                    const frames = await extractVideoFramesForChunk(videoFile, startTimeSec, endTimeSec, 1, reportProgress);
+                    frames.forEach(frameData => {
+                        parts.push({
+                            inlineData: {
+                                mimeType: 'image/jpeg',
+                                data: frameData
+                            }
+                        });
+                    });
+                } catch (frameErr) {
+                    console.warn("Failed to extract frames for chunk", frameErr);
+                }
+            }
+
             let promptText = `You are a professional video subtitler.
-            Task: Transcribe the speech in this audio clip verbatim from beginning to end.
+            Task: ${options?.useVideoOcr ? "Read the burned-in subtitles on the video frames AND transcribe the speech" : "Transcribe the speech in this audio clip"} verbatim from beginning to end.
             Audio duration: ~${Math.round(actualChunkDuration)} seconds.
             
             CRITICAL RULES:
@@ -362,9 +384,11 @@ export const transcribeVideo = async (
             6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. If a word is spoken at second 45, its timestamp MUST be around 45. You MUST align the text with the ACTUAL audio timing.
             8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
+            ${options?.useVideoOcr ? "9. Use the burned-in subtitles on the video as your primary source for exact timing and content. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
             `;
 
             const textPart = { text: promptText };
+            parts.push(textPart);
 
             let parsed: any[] = [];
             let attempts = 0;
@@ -381,9 +405,14 @@ export const transcribeVideo = async (
                     if (attempts > 0) {
                         currentPrompt += `\n\nWARNING: Your previous attempt returned an empty array. You MUST transcribe the speech in this audio. Listen carefully and transcribe from 0 to ${Math.round(actualChunkDuration)} seconds.`;
                     }
+                    
+                    // Replace the text part with the updated prompt
+                    const currentParts = [...parts];
+                    currentParts[currentParts.length - 1] = { text: currentPrompt };
+
                     const response = await ai.models.generateContent({
                       model: modelName,
-                      contents: { parts: [{ text: currentPrompt }, audioPart] },
+                      contents: { parts: currentParts },
                       config: {
                         responseMimeType: "application/json",
                         responseSchema: {
@@ -580,7 +609,7 @@ export const alignDraftWithAudio = async (
     const draftFormatted = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n');
 
     let chunks: Blob[] = [];
-    let useChunking = !options?.useVideoOcr;
+    let useChunking = true; // Always use chunking by default
     const retryLog: { chunk: number; attempts: number; success: boolean }[] = [];
     const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
@@ -619,6 +648,27 @@ export const alignDraftWithAudio = async (
             const isLastChunk = i === chunks.length - 1;
             const actualChunkDuration = isLastChunk && duration ? duration - (i * chunkDurationSec) : chunkDurationSec + overlapSec;
 
+            let parts: any[] = [audioPart];
+
+            if (options?.useVideoOcr && mediaFile.type.startsWith('video/')) {
+                reportProgress(`Extracting video frames for part ${i + 1}...`);
+                const startTimeSec = i * chunkDurationSec;
+                const endTimeSec = startTimeSec + actualChunkDuration;
+                try {
+                    const frames = await extractVideoFramesForChunk(mediaFile, startTimeSec, endTimeSec, 1, reportProgress);
+                    frames.forEach(frameData => {
+                        parts.push({
+                            inlineData: {
+                                mimeType: 'image/jpeg',
+                                data: frameData
+                            }
+                        });
+                    });
+                } catch (frameErr) {
+                    console.warn("Failed to extract frames for chunk", frameErr);
+                }
+            }
+
             // Calculate how many lines to go back to cover the overlap region.
             // Assuming an average of 2 seconds per line, we go back overlapSec / 2 lines, plus a small buffer.
             const overlapLines = Math.ceil(overlapSec / 2) + 2;
@@ -638,7 +688,7 @@ export const alignDraftWithAudio = async (
             DRAFT SECTION:
             ${draftFormattedWindow}
 
-            Task: Listen to the audio chunk carefully. Identify EVERY SINGLE LINE from the draft section that is spoken in this specific chunk.
+            Task: ${options?.useVideoOcr ? "Read the burned-in subtitles on the video frames AND listen to the audio chunk" : "Listen to the audio chunk carefully"}. Identify EVERY SINGLE LINE from the draft section that is spoken in this specific chunk.
             Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
             
             CRITICAL RULES:
@@ -647,8 +697,11 @@ export const alignDraftWithAudio = async (
             3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5) relative to the beginning of this chunk. DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
             4. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
             5. If a line is partially in this chunk, include it.
-            6. Return ONLY valid JSON in this format: [{"lineIndex": 28, "start": 2.1}, {"lineIndex": 29, "start": 62.5}]
+            ${options?.useVideoOcr ? "6. Use the burned-in subtitles on the video as your primary source for exact timing. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n            7. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]" : "6. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]"}
             `;
+
+            const textPart = { text: promptText };
+            parts.push(textPart);
 
             let parsed: any[] = [];
             let attempts = 0;
@@ -657,9 +710,17 @@ export const alignDraftWithAudio = async (
             while (parsed.length === 0 && attempts < maxAttempts) {
                 if (attempts > 0) await new Promise(resolve => setTimeout(resolve, 2000));
                 try {
+                    let currentPrompt = promptText;
+                    if (attempts > 0) {
+                        currentPrompt += `\n\nWARNING: Your previous attempt returned an empty array. You MUST align the text. Listen carefully and find timestamps relative to this chunk (0 to ${Math.round(actualChunkDuration)} seconds).`;
+                    }
+                    
+                    const currentParts = [...parts];
+                    currentParts[currentParts.length - 1] = { text: currentPrompt };
+
                     const response = await ai.models.generateContent({
                       model: modelName,
-                      contents: { parts: [{ text: promptText }, audioPart] },
+                      contents: { parts: currentParts },
                       config: {
                         responseMimeType: "application/json",
                         responseSchema: {

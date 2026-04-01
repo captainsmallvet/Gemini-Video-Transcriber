@@ -152,11 +152,6 @@ const App: React.FC = () => {
 
   const handleAlignDraft = async () => {
     if (!videoFile || !draftText) return;
-    
-    if (useVideoOcr && videoFile.size > 20 * 1024 * 1024) {
-      setError('Error: Video file is too large for OCR alignment. Max size is 20MB. Please disable "Use Video Subtitles (OCR)" or use a smaller video.');
-      return;
-    }
 
     const keyToUse = activeApiKey || process.env.API_KEY;
     if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
@@ -225,11 +220,6 @@ const App: React.FC = () => {
 
   const handleTranscribe = async () => {
     if (!videoFile) return;
-    
-    if (useVideoOcr && videoFile.size > 20 * 1024 * 1024) {
-      setError('Error: Video file is too large for OCR transcription. Max size is 20MB. Please disable "Use Video Subtitles (OCR)" or use a smaller video.');
-      return;
-    }
 
     const keyToUse = activeApiKey || process.env.API_KEY;
     if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
@@ -632,7 +622,7 @@ const App: React.FC = () => {
                       className="w-4 h-4 text-blue-600 bg-gray-800 border-gray-700 rounded focus:ring-blue-500 focus:ring-2"
                     />
                     <label htmlFor="useVideoOcr" className="text-sm text-gray-300">
-                      Use Video Subtitles (OCR) for Alignment (Max 20MB, disables chunking)
+                      Use Video Subtitles (OCR) for Alignment (Extracts frames for accurate timing)
                     </label>
                   </div>
                 )}
