@@ -392,13 +392,13 @@ export const transcribeVideo = async (
 
             let parsed: any[] = [];
             let attempts = 0;
-            const maxAttempts = 3; // Increased to 3 for better resilience
+            const maxAttempts = 5; // Increased to 5 for better resilience
 
             while (parsed.length === 0 && attempts < maxAttempts) {
                 if (attempts > 0) {
-                    reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 2 seconds (attempt ${attempts + 1})...`);
-                    // Add a 2-second delay before retrying to handle rate limits / server overload
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 5 seconds (attempt ${attempts + 1})...`);
+                    // Add a 5-second delay before retrying to handle rate limits / server overload
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 }
                 try {
                     let currentPrompt = promptText;
@@ -705,10 +705,13 @@ export const alignDraftWithAudio = async (
 
             let parsed: any[] = [];
             let attempts = 0;
-            const maxAttempts = 3;
+            const maxAttempts = 5;
 
             while (parsed.length === 0 && attempts < maxAttempts) {
-                if (attempts > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+                if (attempts > 0) {
+                    reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 5 seconds (attempt ${attempts + 1})...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
                 try {
                     let currentPrompt = promptText;
                     if (attempts > 0) {

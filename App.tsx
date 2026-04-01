@@ -23,7 +23,7 @@ const App: React.FC = () => {
   // Configuration Settings
   const [chunkLength, setChunkLength] = useState<number>(90);
   const [overlapTime, setOverlapTime] = useState<number>(30);
-  const [delayTime, setDelayTime] = useState<number>(3);
+  const [delayTime, setDelayTime] = useState<number>(5);
   const [lookaheadLines, setLookaheadLines] = useState<number>(5);
   const [useVideoOcr, setUseVideoOcr] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
