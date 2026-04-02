@@ -273,6 +273,9 @@ const App: React.FC = () => {
           if (result.rawVisionData) {
               setVisionRawData(result.rawVisionData);
           }
+          if (result.debugLogs) {
+              setDebugLogs(result.debugLogs);
+          }
           
           // Check if there were any retries or failures to show the summary modal
           const hasRetriesOrFailures = result.retryLog.some(log => log.attempts > 1 || !log.success);

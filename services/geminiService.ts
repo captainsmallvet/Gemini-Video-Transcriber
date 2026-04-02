@@ -264,6 +264,7 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
 
     let allSegments: any[] = [];
     const retryLog: any[] = [];
+    const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
     for (let i = 0; i < totalChunks; i++) {
         const startTimeSec = i * chunkDurationSec;
@@ -312,6 +313,7 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
                     config: { responseMimeType: "application/json" }
                 });
                 const resultText = response.text || "[]";
+                debugLogs.push({ chunk: i + 1, draftWindow: "Vision Mode (No Draft)", aiResponse: resultText });
                 let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                 const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                 if (jsonMatch) jsonString = jsonMatch[0];
@@ -350,7 +352,7 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
         }
     }
 
-    return { data: JSON.stringify(deduplicated), retryLog };
+    return { data: JSON.stringify(deduplicated), retryLog, debugLogs };
 }
 
 async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<any[]> {
@@ -773,7 +775,8 @@ export const alignDraftWithAudio = async (
         return { 
             data: JSON.stringify(continuousSegments), 
             rawVisionData: rawResult.data,
-            retryLog: rawResult.retryLog 
+            retryLog: rawResult.retryLog,
+            debugLogs: rawResult.debugLogs
         };
     }
 
