@@ -32,86 +32,43 @@ const parseTime = (time: any): number => {
 };
 
 const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): any[] => {
-    let prevTime = 0;
     const maxAllowedTime = actualChunkDuration + 15; // 15s buffer
 
-    const correctedData = parsedData.map(item => {
-        let start = parseTime(item.start);
-        
-        // Auto-correct M:SS format hallucinated as MSS.ms (e.g., 102.5 -> 62.5)
-        if (start >= 100 && start > maxAllowedTime) {
-            const mins = Math.floor(start / 100);
-            const secs = start % 100;
-            const corrected = (mins * 60) + secs;
-            if (corrected <= maxAllowedTime) {
-                start = corrected;
-            }
-        }
-        
-        // Auto-correct M.SS format hallucinated as M.SS (e.g., 1.06 -> 66.0)
-        if (start < 10 && prevTime > 30) {
-            const mins = Math.floor(start);
-            const secs = Math.round((start - mins) * 100);
-            const corrected = (mins * 60) + secs;
-            if (corrected > prevTime && corrected <= maxAllowedTime) {
-                start = corrected;
-            }
-        }
-
-        let end = item.end !== undefined ? parseTime(item.end) : undefined;
-        if (end !== undefined) {
-            if (end >= 100 && end > maxAllowedTime) {
-                const mins = Math.floor(end / 100);
-                const secs = end % 100;
-                const corrected = (mins * 60) + secs;
-                if (corrected <= maxAllowedTime) {
-                    end = corrected;
-                }
-            }
-            if (end < 10 && start > 30) {
-                const mins = Math.floor(end);
-                const secs = Math.round((end - mins) * 100);
-                const corrected = (mins * 60) + secs;
-                if (corrected > start && corrected <= maxAllowedTime) {
-                    end = corrected;
-                }
-            }
-        }
-
-        prevTime = start;
+    // 1. Parse times and filter out out-of-bounds items
+    // The AI might hallucinate timestamps for lines beyond the audio chunk.
+    // We just ignore them so the next chunk can pick them up.
+    let validData = parsedData.map(item => {
         return {
             ...item,
-            start,
-            ...(end !== undefined && { end })
+            start: parseTime(item.start),
+            ...(item.end !== undefined && { end: parseTime(item.end) })
         };
-    });
+    }).filter(item => item.start >= 0 && item.start <= maxAllowedTime);
 
-    // Validate bounds
-    const hasOutOfBounds = correctedData.some(item => item.start > maxAllowedTime || item.start < 0);
-    if (hasOutOfBounds) {
-        throw new Error(`AI generated timestamps out of bounds for chunk duration ${actualChunkDuration}. Forcing retry.`);
+    if (validData.length === 0) {
+        return []; // Will trigger a retry
     }
 
-    // Validate if timestamps are too compressed (impossible speech rate)
-    if (correctedData.length > 5) {
-        const minTime = Math.min(...correctedData.map(item => item.start));
-        const maxTime = Math.max(...correctedData.map(item => item.start));
+    // 2. Validate if timestamps are too compressed (impossible speech rate)
+    if (validData.length > 5) {
+        const minTime = Math.min(...validData.map(item => item.start));
+        const maxTime = Math.max(...validData.map(item => item.start));
         const timeSpan = maxTime - minTime;
         
         // If average time per line is less than 0.2 seconds, it's highly likely hallucinated
-        if (timeSpan < correctedData.length * 0.2) {
-            throw new Error(`AI generated timestamps are too compressed (${timeSpan.toFixed(2)}s for ${correctedData.length} lines). Forcing retry.`);
+        if (timeSpan < validData.length * 0.2) {
+            throw new Error(`AI generated timestamps are too compressed (${timeSpan.toFixed(2)}s for ${validData.length} lines). Forcing retry.`);
         }
     }
 
-    // Validate severe backwards jumps
+    // 3. Validate severe backwards jumps
     let significantBackwardsJumps = 0;
     let totalBackwardsJumps = 0;
-    for (let i = 1; i < correctedData.length; i++) {
-        if (correctedData[i-1].start > correctedData[i].start) {
+    for (let i = 1; i < validData.length; i++) {
+        if (validData[i-1].start > validData[i].start) {
             totalBackwardsJumps++;
             // A jump backwards of more than 2 seconds is highly suspicious
-            if (correctedData[i-1].start - correctedData[i].start > 2) {
+            if (validData[i-1].start - validData[i].start > 2) {
                 significantBackwardsJumps++;
             }
         }
@@ -121,7 +78,7 @@ const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): an
         throw new Error(`AI generated timestamps contain backwards jumps (${totalBackwardsJumps} total, ${significantBackwardsJumps} severe). Forcing retry.`);
     }
 
-    return correctedData;
+    return validData;
 };
 
 const cleanSegments = (segments: any[]) => {
@@ -381,7 +338,7 @@ export const transcribeVideo = async (
             3. Transcribe EVERY spoken word. Do not summarize, skip, or paraphrase.
             4. STRICT LENGTH LIMIT: A single segment MUST NOT exceed 10 words. This is a hard limit.
             5. FORCED SPLITTING: You MUST create a new segment object in the JSON after EVERY comma (,), EVERY period (.), and EVERY conjunction (and, but, because, or). Never put a long sentence in a single segment.
-            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
+            6. TIMESTAMPS MUST BE IN RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5.
             7. PREVENT TIMESTAMP COMPRESSION: DO NOT hallucinate timestamps. DO NOT squeeze all subtitles into the first few seconds. If a word is spoken at second 45, its timestamp MUST be around 45. You MUST align the text with the ACTUAL audio timing.
             8. DO NOT return an empty array unless the audio is 100% silent. If you hear ANY speech, you MUST transcribe it.
             ${options?.useVideoOcr ? "9. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time of the speech. If the audio differs slightly from the burned-in subtitles, prefer the burned-in subtitles for timing, but ensure the transcribed text matches the spoken audio." : ""}
@@ -692,12 +649,13 @@ export const alignDraftWithAudio = async (
             Return a JSON array of objects containing the 'lineIndex' and the exact 'start' time in seconds.
             
             CRITICAL RULES:
-            1. You MUST include EVERY line from the draft that you hear in this chunk. Do not skip any lines.
-            2. 'lineIndex' MUST match the index in the draft exactly as shown in the brackets (e.g., [28] -> 28).
-            3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5) relative to the beginning of this chunk. DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
-            4. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
-            5. If a line is partially in this chunk, include it.
-            ${options?.useVideoOcr ? "6. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n            7. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]" : "6. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]"}
+            1. You MUST include EVERY line from the draft that you ACTUALLY hear or see in this specific chunk.
+            2. DO NOT hallucinate or guess timestamps for lines that occur after the audio/video chunk ends. If the chunk ends before the draft ends, simply stop transcribing.
+            3. 'lineIndex' MUST match the index in the draft exactly as shown in the brackets (e.g., [28] -> 28).
+            4. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5) relative to the beginning of this chunk. DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5.
+            5. CONSIDER THE WHOLE SENTENCE CONTEXT AND OVERALL MEANING, not just the first word. If there are repeated words (e.g., "Da-na"), ensure you are matching the correct sentence based on the words that follow it.
+            6. If a line is partially in this chunk, include it.
+            ${options?.useVideoOcr ? "7. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n            8. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]" : "7. Return ONLY valid JSON in this format: [{\"lineIndex\": 28, \"start\": 2.1}, {\"lineIndex\": 29, \"start\": 62.5}]"}
             `;
 
             const textPart = { text: promptText };
@@ -850,7 +808,7 @@ export const alignDraftWithAudio = async (
         CRITICAL RULES:
         1. You MUST include EVERY line from the draft. Do not skip any lines.
         2. 'lineIndex' MUST match the index in the draft exactly.
-        3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5, NEVER 102.5 or 1.02.
+        3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5). DO NOT use MM:SS format. For example, 1 minute and 2.5 seconds MUST be written as 62.5.
         ${options?.useVideoOcr ? "4. Use the burned-in subtitles AND any on-screen burned-in timecode/timer on the video frames as your primary source for exact timing. If there is a visible clock/timer, read it to determine the exact start time. The draft text provided is the ground truth for the content, but the video frames show exactly when each subtitle should appear.\n        5. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]" : "4. Return ONLY valid JSON in this format: [{\"lineIndex\": 1, \"start\": 2.1}, {\"lineIndex\": 2, \"start\": 62.5}]"}
         `;
 
