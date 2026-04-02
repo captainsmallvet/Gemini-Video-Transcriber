@@ -284,15 +284,15 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
         const promptText = `You are a highly accurate OCR and timecode reading system.
         I am providing a sequence of video frames extracted at ${fps} frames per second from ${startTimeSec}s to ${endTimeSec}s.
         
-        Task: Read the burned-in subtitles AND the burned-in timecode/timer on the screen.
+        Task: Read the subtitles on the screen AND the burned-in timer/timecode.
         Return a JSON array of objects representing each subtitle shown.
         
         CRITICAL RULES:
         1. 'text': The exact text of the subtitle.
-        2. 'start': The EXACT timecode (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Read the on-screen clock/timer!
-        3. 'end': The EXACT timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
-        4. DO NOT guess or hallucinate. Only transcribe what you visually see in these frames.
-        5. Return ONLY valid JSON in this format: [{"text": "Hello world", "start": 12.0, "end": 14.5}]`;
+        2. 'start': The EXACT timecode (in RAW SECONDS, e.g., 62.531) when this subtitle FIRST appears. You MUST read the on-screen clock/timer if it is present. The timer is highly precise.
+        3. 'end': The EXACT timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes. Read the on-screen clock/timer.
+        4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}. DO NOT output times outside this range.
+        5. Return ONLY valid JSON in this format: [{"text": "Hello world", "start": ${startTimeSec + 1.025}, "end": ${startTimeSec + 3.501}}]`;
         
         parts.push({ text: promptText });
 
@@ -374,14 +374,15 @@ async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], 
         DRAFT TRANSCRIPT TO ALIGN:
         ${draftFormatted}
         
-        Task: Match EVERY line from the DRAFT to the RAW transcript to find its exact start time.
+        Task: Match EVERY line from the DRAFT to the RAW transcript to find its start time.
         If a draft line doesn't perfectly match the raw text, interpolate or calculate the correct start time based on surrounding matched lines.
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
-        3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5).
-        4. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.1}, ...]`;
+        3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
+        4. The 'start' times MUST be monotonically increasing (each line's start time must be >= the previous line's start time).
+        5. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
         
         let parsed: any[] = [];
         let attempts = 0;
@@ -732,19 +733,40 @@ export const alignDraftWithAudio = async (
         reportProgress("Step 2: Aligning draft with extracted vision subtitles...");
         const alignedParsed = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress);
 
+        let lastValidTime = 0;
         const continuousSegments: any[] = lines.map((text, idx) => {
             const match = alignedParsed.find(p => p.lineIndex === idx + 1);
+            let start = match && typeof match.start === 'number' ? match.start : -1;
+            
+            // Ensure time doesn't jump backwards or exceed duration
+            if (start < lastValidTime) {
+                start = lastValidTime + 0.5; // Add a small increment if it jumps back or is missing
+            }
+            if (duration && start > duration) {
+                start = lastValidTime + 0.1; // Don't let it exceed video duration
+            }
+            
+            lastValidTime = start;
             return {
-                start: match ? match.start : 0, // Fallback
+                start,
                 text
             };
         });
         
         for (let i = 0; i < continuousSegments.length; i++) {
             if (i < continuousSegments.length - 1) {
-                continuousSegments[i].end = continuousSegments[i+1].start - 0.001;
+                // Ensure end time is strictly greater than start time
+                let nextStart = continuousSegments[i+1].start;
+                if (nextStart <= continuousSegments[i].start) {
+                     nextStart = continuousSegments[i].start + 1;
+                     continuousSegments[i+1].start = nextStart;
+                }
+                continuousSegments[i].end = nextStart - 0.001;
             } else {
                 continuousSegments[i].end = continuousSegments[i].start + 2;
+                if (duration && continuousSegments[i].end > duration) {
+                    continuousSegments[i].end = duration;
+                }
             }
         }
 

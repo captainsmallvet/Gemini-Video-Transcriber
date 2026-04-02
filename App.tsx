@@ -22,7 +22,7 @@ const App: React.FC = () => {
   
   // Configuration Settings
   const [transcriptionMode, setTranscriptionMode] = useState<'audio' | 'vision'>('audio');
-  const [frameRate, setFrameRate] = useState<number>(5);
+  const [frameRate, setFrameRate] = useState<number>(2);
   const [visionRawData, setVisionRawData] = useState<string>('');
   const [chunkLength, setChunkLength] = useState<number>(90);
   const [overlapTime, setOverlapTime] = useState<number>(30);
@@ -38,10 +38,11 @@ const App: React.FC = () => {
           setDelayTime(5);
           setLookaheadLines(5);
       } else {
-          setChunkLength(30);
+          setChunkLength(90);
           setOverlapTime(1);
           setDelayTime(5);
           setLookaheadLines(5);
+          setFrameRate(2);
       }
   }, [transcriptionMode]);
   
