@@ -21,12 +21,29 @@ const App: React.FC = () => {
   const [debugLogs, setDebugLogs] = useState<{ chunk: number; draftWindow: string; aiResponse: string }[]>([]);
   
   // Configuration Settings
+  const [transcriptionMode, setTranscriptionMode] = useState<'audio' | 'vision'>('audio');
+  const [frameRate, setFrameRate] = useState<number>(5);
+  const [visionRawData, setVisionRawData] = useState<string>('');
   const [chunkLength, setChunkLength] = useState<number>(90);
   const [overlapTime, setOverlapTime] = useState<number>(30);
   const [delayTime, setDelayTime] = useState<number>(5);
   const [lookaheadLines, setLookaheadLines] = useState<number>(5);
   const [useVideoOcr, setUseVideoOcr] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+
+  useEffect(() => {
+      if (transcriptionMode === 'audio') {
+          setChunkLength(90);
+          setOverlapTime(30);
+          setDelayTime(5);
+          setLookaheadLines(5);
+      } else {
+          setChunkLength(30);
+          setOverlapTime(1);
+          setDelayTime(5);
+          setLookaheadLines(5);
+      }
+  }, [transcriptionMode]);
   
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
@@ -166,10 +183,11 @@ const App: React.FC = () => {
     setCopySuccess('');
     setRetrySummary([]);
     setDebugLogs([]);
+    setVisionRawData('');
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate };
       const result = await alignDraftWithAudio(videoFile, draftText, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -180,6 +198,9 @@ const App: React.FC = () => {
           setSegments([]);
       } else if (typeof result !== 'string') {
           setTranscript(result.data);
+          if (result.rawVisionData) {
+              setVisionRawData(result.rawVisionData);
+          }
           if (result.debugLogs) {
               setDebugLogs(result.debugLogs);
           }
@@ -233,10 +254,11 @@ const App: React.FC = () => {
     setTranscript(null);
     setCopySuccess('');
     setRetrySummary([]);
+    setVisionRawData('');
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate };
       const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -247,6 +269,9 @@ const App: React.FC = () => {
           setSegments([]);
       } else if (typeof result !== 'string') {
           setTranscript(result.data);
+          if (result.rawVisionData) {
+              setVisionRawData(result.rawVisionData);
+          }
           
           // Check if there were any retries or failures to show the summary modal
           const hasRetriesOrFailures = result.retryLog.some(log => log.attempts > 1 || !log.success);
@@ -560,6 +585,41 @@ const App: React.FC = () => {
             </div>
           </div>
 
+          {/* Transcription Mode Selection */}
+          <div className="border-t border-gray-700 pt-4 mt-6">
+            <label className="block text-sm font-semibold text-gray-300 mb-3">Transcription Mode</label>
+            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-6">
+              <label className="flex items-center space-x-3 cursor-pointer group">
+                <div className="relative flex items-center justify-center">
+                  <input 
+                    type="radio" 
+                    name="transcriptionMode" 
+                    value="audio"
+                    checked={transcriptionMode === 'audio'}
+                    onChange={() => setTranscriptionMode('audio')}
+                    className="appearance-none w-5 h-5 border-2 border-gray-500 rounded-full checked:border-blue-500 transition-colors"
+                  />
+                  {transcriptionMode === 'audio' && <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full"></div>}
+                </div>
+                <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Use Audio & Video (Existing System)</span>
+              </label>
+              <label className="flex items-center space-x-3 cursor-pointer group">
+                <div className="relative flex items-center justify-center">
+                  <input 
+                    type="radio" 
+                    name="transcriptionMode" 
+                    value="vision"
+                    checked={transcriptionMode === 'vision'}
+                    onChange={() => setTranscriptionMode('vision')}
+                    className="appearance-none w-5 h-5 border-2 border-gray-500 rounded-full checked:border-blue-500 transition-colors"
+                  />
+                  {transcriptionMode === 'vision' && <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full"></div>}
+                </div>
+                <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Use Vision Only (No Audio)</span>
+              </label>
+            </div>
+          </div>
+
           {/* Advanced Settings Toggle */}
           <div className="border-t border-gray-700 pt-4 mt-6">
             <button 
@@ -574,7 +634,7 @@ const App: React.FC = () => {
             
             {showSettings && (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-4 bg-gray-900 bg-opacity-50 p-4 rounded-lg border border-gray-700">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 mt-4 bg-gray-900 bg-opacity-50 p-4 rounded-lg border border-gray-700">
                   <div className="flex flex-col space-y-1">
                     <label className="text-xs text-gray-400 font-semibold">Chunk Length (sec)</label>
                     <input 
@@ -609,6 +669,16 @@ const App: React.FC = () => {
                       value={lookaheadLines} 
                       onChange={(e) => setLookaheadLines(Number(e.target.value))}
                       className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Vision FPS</label>
+                    <input 
+                      type="number" 
+                      value={frameRate} 
+                      onChange={(e) => setFrameRate(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                      disabled={transcriptionMode !== 'vision'}
                     />
                   </div>
                 </div>
@@ -724,6 +794,40 @@ const App: React.FC = () => {
                   </pre>
                 )}
               </div>
+
+          {visionRawData && (
+            <div className="space-y-4 mt-8">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h3 className="text-xl font-semibold text-gray-200">Vision Raw Output (Non-Continuous)</h3>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([visionRawData], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = 'vision_raw_data.json';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex items-center space-x-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors border border-gray-600"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>Save JSON</span>
+                  </button>
+                </div>
+              </div>
+              <div className="bg-gray-900 bg-opacity-50 border border-gray-700 rounded-xl p-6 h-[300px] overflow-y-auto font-mono text-sm leading-relaxed shadow-inner">
+                <pre className="whitespace-pre-wrap text-green-300">
+                  {visionRawData}
+                </pre>
+              </div>
+            </div>
+          )}
 
               {/* Debug Logs Section */}
               {debugLogs.length > 0 && (

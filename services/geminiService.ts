@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { fileToBase64 } from '../utils/fileUtils';
-import { extractVideoFramesForChunk } from '../utils/videoUtils';
+import { extractVideoFramesForChunk, getVideoDuration } from '../utils/videoUtils';
 
 const formatDurationForPrompt = (seconds: number): string => {
     if (isNaN(seconds) || seconds < 0) return '';
@@ -238,6 +238,7 @@ const blobToBase64 = (blob: Blob): Promise<{ mimeType: string; data: string; }> 
 
 export interface TranscriptionResult {
   data: string;
+  rawVisionData?: string;
   retryLog: { chunk: number; attempts: number; success: boolean }[];
   debugLogs?: { chunk: number; draftWindow: string; aiResponse: string }[];
 }
@@ -248,6 +249,162 @@ export interface TranscriptionOptions {
   delayTime?: number;
   lookaheadLines?: number;
   useVideoOcr?: boolean;
+  mode?: 'audio' | 'vision';
+  fps?: number;
+}
+
+async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<TranscriptionResult> {
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
+    const duration = await getVideoDuration(mediaFile);
+    const chunkDurationSec = options?.chunkLength || 30;
+    const overlapSec = options?.overlapTime || 1;
+    const fps = options?.fps || 5;
+    const delayTimeMs = (options?.delayTime || 5) * 1000;
+    const totalChunks = Math.ceil(duration / chunkDurationSec);
+
+    let allSegments: any[] = [];
+    const retryLog: any[] = [];
+
+    for (let i = 0; i < totalChunks; i++) {
+        const startTimeSec = i * chunkDurationSec;
+        const endTimeSec = Math.min(startTimeSec + chunkDurationSec + overlapSec, duration);
+        
+        reportProgress(`Processing Vision Chunk ${i + 1}/${totalChunks} (${startTimeSec}s - ${endTimeSec}s)...`);
+        
+        let frames: string[] = [];
+        try {
+            frames = await extractVideoFramesForChunk(mediaFile, startTimeSec, endTimeSec, fps, reportProgress);
+        } catch (e) {
+            console.error("Failed to extract frames", e);
+            continue;
+        }
+        
+        const parts: any[] = frames.map(f => ({ inlineData: { mimeType: 'image/jpeg', data: f } }));
+        
+        const promptText = `You are a highly accurate OCR and timecode reading system.
+        I am providing a sequence of video frames extracted at ${fps} frames per second from ${startTimeSec}s to ${endTimeSec}s.
+        
+        Task: Read the burned-in subtitles AND the burned-in timecode/timer on the screen.
+        Return a JSON array of objects representing each subtitle shown.
+        
+        CRITICAL RULES:
+        1. 'text': The exact text of the subtitle.
+        2. 'start': The EXACT timecode (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Read the on-screen clock/timer!
+        3. 'end': The EXACT timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
+        4. DO NOT guess or hallucinate. Only transcribe what you visually see in these frames.
+        5. Return ONLY valid JSON in this format: [{"text": "Hello world", "start": 12.0, "end": 14.5}]`;
+        
+        parts.push({ text: promptText });
+
+        let parsed: any[] = [];
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        while (parsed.length === 0 && attempts < maxAttempts) {
+            if (attempts > 0) {
+                reportProgress(`Chunk ${i + 1} failed, retrying in 5s...`);
+                await new Promise(r => setTimeout(r, 5000));
+            }
+            try {
+                const response = await ai.models.generateContent({
+                    model: modelName,
+                    contents: { parts },
+                    config: { responseMimeType: "application/json" }
+                });
+                const resultText = response.text || "[]";
+                let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                if (jsonMatch) jsonString = jsonMatch[0];
+                parsed = JSON.parse(jsonString);
+            } catch (e) {
+                console.error("Vision chunk failed", e);
+            }
+            attempts++;
+        }
+        
+        if (parsed.length > 0) {
+            retryLog.push({ chunk: i + 1, attempts, success: true });
+            allSegments.push(...parsed);
+        } else {
+            retryLog.push({ chunk: i + 1, attempts, success: false });
+        }
+        
+        if (i < totalChunks - 1) {
+            await new Promise(r => setTimeout(r, delayTimeMs));
+        }
+    }
+
+    // Clean and deduplicate segments based on text and start time
+    // For vision, we might have overlapping segments from chunks.
+    // cleanSegments handles basic sorting and text cleaning.
+    const cleaned = cleanSegments(allSegments);
+    
+    // Simple deduplication based on text and approximate start time
+    const deduplicated = [];
+    for (const seg of cleaned) {
+        const isDuplicate = deduplicated.some(d => 
+            d.text === seg.text && Math.abs(d.start - seg.start) < 2
+        );
+        if (!isDuplicate) {
+            deduplicated.push(seg);
+        }
+    }
+
+    return { data: JSON.stringify(deduplicated), retryLog };
+}
+
+async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<any[]> {
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
+    const chunkSize = 100; // Process 100 draft lines at a time
+    let allAligned: any[] = [];
+    
+    for (let i = 0; i < draftLines.length; i += chunkSize) {
+        const chunkLines = draftLines.slice(i, i + chunkSize);
+        const startIndex = i + 1;
+        const draftFormatted = chunkLines.map((l, idx) => `[${startIndex + idx}] ${l}`).join('\n');
+        
+        reportProgress(`Aligning draft lines ${startIndex} to ${startIndex + chunkLines.length - 1}...`);
+        
+        const promptText = `You are an expert text aligner.
+        I have a RAW transcript extracted from video OCR (with exact start/end times) and a DRAFT transcript.
+        
+        RAW TRANSCRIPT (JSON):
+        ${JSON.stringify(rawSegments)}
+        
+        DRAFT TRANSCRIPT TO ALIGN:
+        ${draftFormatted}
+        
+        Task: Match EVERY line from the DRAFT to the RAW transcript to find its exact start time.
+        If a draft line doesn't perfectly match the raw text, interpolate or calculate the correct start time based on surrounding matched lines.
+        
+        CRITICAL RULES:
+        1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
+        2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
+        3. 'start' MUST be the exact start time in RAW SECONDS (e.g., 62.5).
+        4. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.1}, ...]`;
+        
+        let parsed: any[] = [];
+        let attempts = 0;
+        while (parsed.length === 0 && attempts < 3) {
+            try {
+                const response = await ai.models.generateContent({
+                    model: modelName,
+                    contents: promptText,
+                    config: { responseMimeType: "application/json" }
+                });
+                const resultText = response.text || "[]";
+                let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                if (jsonMatch) jsonString = jsonMatch[0];
+                parsed = JSON.parse(jsonString);
+            } catch (e) {
+                console.error("Alignment failed", e);
+            }
+            attempts++;
+        }
+        allAligned.push(...parsed);
+    }
+    return allAligned;
 }
 
 export const transcribeVideo = async (
@@ -259,12 +416,16 @@ export const transcribeVideo = async (
   options?: TranscriptionOptions
 ): Promise<TranscriptionResult | string> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    
     const reportProgress = (msg: string) => {
         if (onProgress) onProgress(msg);
         console.log(msg);
     };
+
+    if (options?.mode === 'vision') {
+        return await transcribeVideoVisionOnly(videoFile, modelName, apiKey, reportProgress, options);
+    }
+
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
 
     let chunks: Blob[] = [];
     let useChunking = true; // Always use chunking by default
@@ -555,7 +716,6 @@ export const alignDraftWithAudio = async (
   options?: TranscriptionOptions
 ): Promise<TranscriptionResult | string> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const reportProgress = (msg: string) => {
         if (onProgress) onProgress(msg);
         console.log(msg);
@@ -563,6 +723,39 @@ export const alignDraftWithAudio = async (
 
     const lines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) return "Error: Draft text is empty.";
+
+    if (options?.mode === 'vision') {
+        reportProgress("Step 1: Extracting raw subtitles from video frames...");
+        const rawResult = await transcribeVideoVisionOnly(mediaFile, modelName, apiKey, reportProgress, options);
+        const rawSegments = JSON.parse(rawResult.data);
+
+        reportProgress("Step 2: Aligning draft with extracted vision subtitles...");
+        const alignedParsed = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress);
+
+        const continuousSegments: any[] = lines.map((text, idx) => {
+            const match = alignedParsed.find(p => p.lineIndex === idx + 1);
+            return {
+                start: match ? match.start : 0, // Fallback
+                text
+            };
+        });
+        
+        for (let i = 0; i < continuousSegments.length; i++) {
+            if (i < continuousSegments.length - 1) {
+                continuousSegments[i].end = continuousSegments[i+1].start - 0.001;
+            } else {
+                continuousSegments[i].end = continuousSegments[i].start + 2;
+            }
+        }
+
+        return { 
+            data: JSON.stringify(continuousSegments), 
+            rawVisionData: rawResult.data,
+            retryLog: rawResult.retryLog 
+        };
+    }
+
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const draftFormatted = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n');
 
     let chunks: Blob[] = [];
