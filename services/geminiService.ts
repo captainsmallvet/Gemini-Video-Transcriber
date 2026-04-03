@@ -329,7 +329,21 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
                 const response = await ai.models.generateContent({
                     model: modelName,
                     contents: { parts },
-                    config: { responseMimeType: "application/json" }
+                    config: { 
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    text: { type: Type.STRING, description: "The exact text of the subtitle" },
+                                    start: { type: Type.NUMBER, description: "Start time in seconds" },
+                                    end: { type: Type.NUMBER, description: "End time in seconds" }
+                                },
+                                required: ["text", "start", "end"]
+                            }
+                        }
+                    }
                 });
                 const resultText = response.text || "[]";
                 debugLogs.push({ chunk: i + 1, draftWindow: "Vision Mode (No Draft)", aiResponse: resultText });
@@ -412,7 +426,20 @@ async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], 
                 const response = await ai.models.generateContent({
                     model: modelName,
                     contents: promptText,
-                    config: { responseMimeType: "application/json" }
+                    config: { 
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    lineIndex: { type: Type.NUMBER, description: "Index of the line from the draft" },
+                                    start: { type: Type.NUMBER, description: "Start time in seconds" }
+                                },
+                                required: ["lineIndex", "start"]
+                            }
+                        }
+                    }
                 });
                 const resultText = response.text || "[]";
                 let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
