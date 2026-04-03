@@ -294,19 +294,23 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
             continue;
         }
         
-        const parts: any[] = frames.map(f => ({ inlineData: { mimeType: 'image/jpeg', data: f } }));
+        const parts: any[] = [];
+        frames.forEach((f, index) => {
+            const frameTime = startTimeSec + (index / fps);
+            parts.push({ text: `[Timestamp: ${frameTime.toFixed(2)}s]` });
+            parts.push({ inlineData: { mimeType: 'image/jpeg', data: f } });
+        });
         
         const promptText = `You are a highly accurate OCR system.
-        I am providing a sequence of video frames extracted at ${fps} frames per second from ${startTimeSec}s to ${endTimeSec}s.
-        This means Frame 1 is at ${startTimeSec}s, Frame 2 is at ${startTimeSec + (1/fps)}s, and so on.
+        I am providing a sequence of video frames. Before each frame, I have provided its exact timestamp in seconds (e.g., [Timestamp: 12.50s]).
         
         Task: Read the subtitles on the screen.
         Return a JSON array of objects representing each subtitle shown.
         
         CRITICAL RULES:
         1. 'text': The exact text of the subtitle. IF A SUBTITLE SPANS MULTIPLE LINES ON THE SCREEN, COMBINE THEM INTO A SINGLE STRING SEPARATED BY A SPACE. DO NOT output multiple JSON objects for the same on-screen subtitle block.
-        2. 'start': The timecode (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Calculate this based on the frame's position in the sequence (${fps} frames per second). Do not rely on any burned-in timer.
-        3. 'end': The timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
+        2. 'start': The EXACT timestamp (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Use the [Timestamp: X.XXs] label provided before the frame.
+        3. 'end': The EXACT timestamp (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
         4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
         5. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
         
