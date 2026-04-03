@@ -92,8 +92,24 @@ const cleanSegments = (segments: any[]) => {
         if (merged.length > 0) {
             const prev = merged[merged.length - 1];
             if (Math.abs(current.start - prev.start) < 0.1) {
-                prev.text += '\n' + current.text;
-                continue;
+                const prevTextClean = prev.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const currTextClean = current.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                if (prevTextClean === currTextClean || prevTextClean.includes(currTextClean)) {
+                    // Identical or prev contains current, just keep prev and update end time if longer
+                    if (current.end > prev.end) prev.end = current.end;
+                    continue;
+                } else if (currTextClean.includes(prevTextClean)) {
+                    // Current contains prev, replace prev text
+                    prev.text = current.text;
+                    if (current.end > prev.end) prev.end = current.end;
+                    continue;
+                } else {
+                    // Different text, merge with newline
+                    prev.text += '\n' + current.text;
+                    if (current.end > prev.end) prev.end = current.end;
+                    continue;
+                }
             }
         }
         merged.push({ ...current });
@@ -808,8 +824,18 @@ export const alignDraftWithAudio = async (
             if (mergedSegments.length > 0) {
                 const prev = mergedSegments[mergedSegments.length - 1];
                 if (Math.abs(current.start - prev.start) < 0.1) {
-                    prev.text += '\n' + current.text;
-                    continue;
+                    const prevTextClean = prev.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const currTextClean = current.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    
+                    if (prevTextClean === currTextClean || prevTextClean.includes(currTextClean)) {
+                        continue;
+                    } else if (currTextClean.includes(prevTextClean)) {
+                        prev.text = current.text;
+                        continue;
+                    } else {
+                        prev.text += '\n' + current.text;
+                        continue;
+                    }
                 }
             }
             mergedSegments.push({ ...current });
@@ -1207,8 +1233,18 @@ export const alignDraftWithAudio = async (
         if (mergedSegments.length > 0) {
             const prev = mergedSegments[mergedSegments.length - 1];
             if (Math.abs(start - prev.start) < 0.1) {
-                prev.text += '\n' + lines[i];
-                continue;
+                const prevTextClean = prev.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const currTextClean = lines[i].toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                if (prevTextClean === currTextClean || prevTextClean.includes(currTextClean)) {
+                    continue;
+                } else if (currTextClean.includes(prevTextClean)) {
+                    prev.text = lines[i];
+                    continue;
+                } else {
+                    prev.text += '\n' + lines[i];
+                    continue;
+                }
             }
         }
         mergedSegments.push({
