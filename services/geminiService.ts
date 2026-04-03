@@ -85,10 +85,24 @@ const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
     
-    // Deduplication pass: remove segments that are too similar and overlapping
-    const deduplicated = [];
+    // Merge pass: combine segments that start at the exact same time
+    const merged: any[] = [];
     for (let i = 0; i < segments.length; i++) {
         const current = segments[i];
+        if (merged.length > 0) {
+            const prev = merged[merged.length - 1];
+            if (Math.abs(current.start - prev.start) < 0.1) {
+                prev.text += '\n' + current.text;
+                continue;
+            }
+        }
+        merged.push({ ...current });
+    }
+
+    // Deduplication pass: remove segments that are too similar and overlapping
+    const deduplicated = [];
+    for (let i = 0; i < merged.length; i++) {
+        const current = merged[i];
         if (deduplicated.length > 0) {
             const prev = deduplicated[deduplicated.length - 1];
             // If current starts very close to prev, and text is similar or one contains the other
@@ -282,18 +296,19 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
         
         const parts: any[] = frames.map(f => ({ inlineData: { mimeType: 'image/jpeg', data: f } }));
         
-        const promptText = `You are a highly accurate OCR and timecode reading system.
+        const promptText = `You are a highly accurate OCR system.
         I am providing a sequence of video frames extracted at ${fps} frames per second from ${startTimeSec}s to ${endTimeSec}s.
+        This means Frame 1 is at ${startTimeSec}s, Frame 2 is at ${startTimeSec + (1/fps)}s, and so on.
         
-        Task: Read the subtitles on the screen AND the burned-in timer/timecode.
+        Task: Read the subtitles on the screen.
         Return a JSON array of objects representing each subtitle shown.
         
         CRITICAL RULES:
-        1. 'text': The exact text of the subtitle.
-        2. 'start': The EXACT timecode (in RAW SECONDS, e.g., 62.531) when this subtitle FIRST appears. You MUST read the on-screen clock/timer if it is present. The timer is highly precise.
-        3. 'end': The EXACT timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes. Read the on-screen clock/timer.
-        4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}. DO NOT output times outside this range.
-        5. Return ONLY valid JSON in this format: [{"text": "Hello world", "start": ${startTimeSec + 1.025}, "end": ${startTimeSec + 3.501}}]`;
+        1. 'text': The exact text of the subtitle. IF A SUBTITLE SPANS MULTIPLE LINES ON THE SCREEN, COMBINE THEM INTO A SINGLE STRING SEPARATED BY A SPACE. DO NOT output multiple JSON objects for the same on-screen subtitle block.
+        2. 'start': The timecode (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Calculate this based on the frame's position in the sequence (${fps} frames per second). Do not rely on any burned-in timer.
+        3. 'end': The timecode (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
+        4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
+        5. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
         
         parts.push({ text: promptText });
 
@@ -755,25 +770,39 @@ export const alignDraftWithAudio = async (
             };
         });
         
+        // Merge segments with the exact same start time
+        const mergedSegments: any[] = [];
         for (let i = 0; i < continuousSegments.length; i++) {
-            if (i < continuousSegments.length - 1) {
-                // Ensure end time is strictly greater than start time
-                let nextStart = continuousSegments[i+1].start;
-                if (nextStart <= continuousSegments[i].start) {
-                     nextStart = continuousSegments[i].start + 1;
-                     continuousSegments[i+1].start = nextStart;
+            const current = continuousSegments[i];
+            if (mergedSegments.length > 0) {
+                const prev = mergedSegments[mergedSegments.length - 1];
+                if (Math.abs(current.start - prev.start) < 0.1) {
+                    prev.text += '\n' + current.text;
+                    continue;
                 }
-                continuousSegments[i].end = nextStart - 0.001;
+            }
+            mergedSegments.push({ ...current });
+        }
+
+        for (let i = 0; i < mergedSegments.length; i++) {
+            if (i < mergedSegments.length - 1) {
+                // Ensure end time is strictly greater than start time
+                let nextStart = mergedSegments[i+1].start;
+                if (nextStart <= mergedSegments[i].start) {
+                     nextStart = mergedSegments[i].start + 1;
+                     mergedSegments[i+1].start = nextStart;
+                }
+                mergedSegments[i].end = nextStart - 0.001;
             } else {
-                continuousSegments[i].end = continuousSegments[i].start + 2;
-                if (duration && continuousSegments[i].end > duration) {
-                    continuousSegments[i].end = duration;
+                mergedSegments[i].end = mergedSegments[i].start + 2;
+                if (duration && mergedSegments[i].end > duration) {
+                    mergedSegments[i].end = duration;
                 }
             }
         }
 
         return { 
-            data: JSON.stringify(continuousSegments), 
+            data: JSON.stringify(mergedSegments), 
             rawVisionData: rawResult.data,
             retryLog: rawResult.retryLog,
             debugLogs: rawResult.debugLogs
@@ -1141,24 +1170,40 @@ export const alignDraftWithAudio = async (
         }
     }
 
-    const finalSegments = [];
+    const mergedSegments: any[] = [];
     for (let i = 0; i < lines.length; i++) {
         const start = aligned.get(i)!;
-        let end = duration || start + 3;
-        if (i < lines.length - 1) {
-            end = aligned.get(i + 1)! - 0.001;
+        if (mergedSegments.length > 0) {
+            const prev = mergedSegments[mergedSegments.length - 1];
+            if (Math.abs(start - prev.start) < 0.1) {
+                prev.text += '\n' + lines[i];
+                continue;
+            }
         }
-        
-        if (end <= start) end = start + 0.1;
-        
-        finalSegments.push({
+        mergedSegments.push({
             start,
-            end,
+            end: duration || start + 3,
             text: lines[i]
         });
     }
 
-    return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
+    for (let i = 0; i < mergedSegments.length; i++) {
+        if (i < mergedSegments.length - 1) {
+            let nextStart = mergedSegments[i+1].start;
+            if (nextStart <= mergedSegments[i].start) {
+                nextStart = mergedSegments[i].start + 1;
+                mergedSegments[i+1].start = nextStart;
+            }
+            mergedSegments[i].end = nextStart - 0.001;
+        } else {
+            mergedSegments[i].end = mergedSegments[i].start + 2;
+            if (duration && mergedSegments[i].end > duration) {
+                mergedSegments[i].end = duration;
+            }
+        }
+    }
+
+    return { data: JSON.stringify(mergedSegments), retryLog, debugLogs };
 
   } catch (error) {
     console.error("Error aligning draft:", error);
