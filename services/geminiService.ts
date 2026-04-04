@@ -81,6 +81,27 @@ const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): an
     return validData;
 };
 
+const applyTimeCompensation = (segments: any[], compensation: number) => {
+    if (!compensation || compensation === 0) return segments;
+    return segments.map(seg => {
+        let newStart = seg.start - compensation;
+        if (newStart < 0) newStart = 0;
+        
+        let newEnd = seg.end;
+        if (newEnd !== undefined) {
+            newEnd = newEnd - compensation;
+            if (newEnd < 0) newEnd = 0;
+            if (newEnd < newStart) newEnd = newStart + 0.1; // Ensure end is after start
+        }
+        
+        return {
+            ...seg,
+            start: newStart,
+            end: newEnd
+        };
+    });
+};
+
 const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
@@ -281,6 +302,7 @@ export interface TranscriptionOptions {
   useVideoOcr?: boolean;
   mode?: 'audio' | 'vision';
   fps?: number;
+  timeCompensation?: number;
 }
 
 async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<TranscriptionResult> {
@@ -401,7 +423,9 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
         }
     }
 
-    return { data: JSON.stringify(deduplicated), retryLog, debugLogs };
+    const finalSegments = applyTimeCompensation(deduplicated, options?.timeCompensation || 0);
+
+    return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
 
 async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<any[]> {
@@ -670,7 +694,8 @@ export const transcribeVideo = async (
 
         reportProgress("Finalizing transcription...");
         const cleanedSegments = cleanSegments(allSegments);
-        return { data: JSON.stringify(cleanedSegments), retryLog };
+        const finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+        return { data: JSON.stringify(finalSegments), retryLog };
     }
 
     // --- Fallback: Process entire video at once ---
@@ -747,7 +772,8 @@ export const transcribeVideo = async (
                 text: seg.text
             }));
             const cleanedSegments = cleanSegments(normalizedParsed);
-            return { data: JSON.stringify(cleanedSegments), retryLog: [] };
+            const finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+            return { data: JSON.stringify(finalSegments), retryLog: [] };
         }
     } catch (e) {
         console.error("Failed to parse fallback JSON", e);
@@ -858,8 +884,10 @@ export const alignDraftWithAudio = async (
             }
         }
 
+        const finalSegments = applyTimeCompensation(mergedSegments, options?.timeCompensation || 0);
+
         return { 
-            data: JSON.stringify(mergedSegments), 
+            data: JSON.stringify(finalSegments), 
             rawVisionData: rawResult.data,
             retryLog: rawResult.retryLog,
             debugLogs: rawResult.debugLogs
@@ -1270,7 +1298,9 @@ export const alignDraftWithAudio = async (
         }
     }
 
-    return { data: JSON.stringify(mergedSegments), retryLog, debugLogs };
+    const finalSegments = applyTimeCompensation(mergedSegments, options?.timeCompensation || 0);
+
+    return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 
   } catch (error) {
     console.error("Error aligning draft:", error);

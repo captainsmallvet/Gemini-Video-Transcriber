@@ -23,6 +23,7 @@ const App: React.FC = () => {
   // Configuration Settings
   const [transcriptionMode, setTranscriptionMode] = useState<'audio' | 'vision'>('audio');
   const [frameRate, setFrameRate] = useState<number>(2);
+  const [timeCompensation, setTimeCompensation] = useState<number>(0.5);
   const [visionRawData, setVisionRawData] = useState<string>('');
   const [chunkLength, setChunkLength] = useState<number>(90);
   const [overlapTime, setOverlapTime] = useState<number>(30);
@@ -188,7 +189,7 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate, timeCompensation };
       const result = await alignDraftWithAudio(videoFile, draftText, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -259,7 +260,7 @@ const App: React.FC = () => {
     setShowSummaryModal(false);
 
     try {
-      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate };
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: transcriptionMode, fps: frameRate, timeCompensation };
       const result = await transcribeVideo(videoFile, videoDuration, keyToUse, selectedModel, (msg) => {
           setProgressMessage(msg);
       }, options);
@@ -683,6 +684,17 @@ const App: React.FC = () => {
                       onChange={(e) => setFrameRate(Number(e.target.value))}
                       className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
                       disabled={transcriptionMode !== 'vision'}
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-xs text-gray-400 font-semibold">Time Comp. (s)</label>
+                    <input 
+                      type="number" 
+                      step="0.1"
+                      value={timeCompensation} 
+                      onChange={(e) => setTimeCompensation(Number(e.target.value))}
+                      className="bg-black text-white px-3 py-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none text-sm"
+                      title="Subtracts this amount from start/end times to compensate for frame capture delay."
                     />
                   </div>
                 </div>
