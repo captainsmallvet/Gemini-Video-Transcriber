@@ -877,10 +877,11 @@ export const alignDraftWithAudio = async (
                      mergedSegments[i+1].start = nextStart;
                 }
                 
-                // Calculate a reasonable end time (e.g., 3 seconds or before the next segment)
-                let calculatedEnd = mergedSegments[i].start + 3;
-                if (calculatedEnd > nextStart) {
-                    calculatedEnd = nextStart - 0.001;
+                // Make subtitles continuous by extending to the next segment's start
+                let calculatedEnd = nextStart - 0.001;
+                // Cap at 15 seconds to prevent subtitles staying on screen forever during long silences
+                if (calculatedEnd - mergedSegments[i].start > 15) {
+                    calculatedEnd = mergedSegments[i].start + 15;
                 }
                 mergedSegments[i].end = calculatedEnd;
             } else {
@@ -1295,10 +1296,11 @@ export const alignDraftWithAudio = async (
                 mergedSegments[i+1].start = nextStart;
             }
             
-            // Calculate a reasonable end time (e.g., 3 seconds or before the next segment)
-            let calculatedEnd = mergedSegments[i].start + 3;
-            if (calculatedEnd > nextStart) {
-                calculatedEnd = nextStart - 0.001;
+            // Make subtitles continuous by extending to the next segment's start
+            let calculatedEnd = nextStart - 0.001;
+            // Cap at 15 seconds to prevent subtitles staying on screen forever during long silences
+            if (calculatedEnd - mergedSegments[i].start > 15) {
+                calculatedEnd = mergedSegments[i].start + 15;
             }
             mergedSegments[i].end = calculatedEnd;
         } else {
