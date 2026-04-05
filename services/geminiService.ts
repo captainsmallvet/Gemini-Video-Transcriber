@@ -351,7 +351,11 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
         2. 'start': The EXACT timestamp (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Use the [Timestamp: X.XXs] label provided before the frame.
         3. 'end': The EXACT timestamp (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
         4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
-        5. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
+        5. DO NOT hallucinate, guess, or auto-complete text. ONLY transcribe text that is clearly visible in the provided frames. If a sentence is cut off at the end of the frames, transcribe ONLY the visible portion.
+        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles, even if they look similar to previous ones but contain different words.
+        7. NEVER assign the exact same 'start' and 'end' time to multiple distinct subtitles. Each distinct subtitle must have its own unique time range corresponding to when it is actually visible.
+        8. If you reach the last frame provided, STOP. DO NOT transcribe text that you expect to come next but is not visible in the current frames.
+        9. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
         
         parts.push({ text: promptText });
 
