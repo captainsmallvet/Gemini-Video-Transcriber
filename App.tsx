@@ -698,7 +698,7 @@ const App: React.FC = () => {
                     />
                   </div>
                 </div>
-                {videoFile && videoFile.type.startsWith('video/') && (
+                {videoFile && videoFile.type.startsWith('video/') && transcriptionMode !== 'vision' && (
                   <div className="mt-4 flex items-center space-x-2">
                     <input
                       type="checkbox"
