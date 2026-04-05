@@ -891,10 +891,8 @@ export const alignDraftWithAudio = async (
             }
         }
 
-        const finalSegments = applyTimeCompensation(mergedSegments, options?.timeCompensation || 0);
-
         return { 
-            data: JSON.stringify(finalSegments), 
+            data: JSON.stringify(mergedSegments), 
             rawVisionData: rawResult.data,
             retryLog: rawResult.retryLog,
             debugLogs: rawResult.debugLogs
