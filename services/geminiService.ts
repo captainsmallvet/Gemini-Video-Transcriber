@@ -167,13 +167,14 @@ const cleanSegments = (segments: any[]) => {
         const current = segments[j];
         const next = segments[j + 1];
         
-        // Extend current.end to the start of the next segment to avoid gaps,
-        // as requested by the user, but respect the maximum duration rule.
-        if (next) {
-            // Extend to just before the next segment starts
+        // Use the AI-provided end time, or fallback to start + 3 if missing
+        if (!current.end || current.end <= current.start) {
+            current.end = current.start + 3;
+        }
+        
+        // Prevent overlapping with the next segment
+        if (next && current.end > next.start) {
             current.end = next.start - 0.001;
-        } else if (!current.end || current.end <= current.start) {
-            current.end = current.start + 3; // Default 3 seconds for the last segment
         }
         
         // Safety check 1: ensure end is always strictly greater than start
@@ -875,9 +876,15 @@ export const alignDraftWithAudio = async (
                      nextStart = mergedSegments[i].start + 1;
                      mergedSegments[i+1].start = nextStart;
                 }
-                mergedSegments[i].end = nextStart - 0.001;
+                
+                // Calculate a reasonable end time (e.g., 3 seconds or before the next segment)
+                let calculatedEnd = mergedSegments[i].start + 3;
+                if (calculatedEnd > nextStart) {
+                    calculatedEnd = nextStart - 0.001;
+                }
+                mergedSegments[i].end = calculatedEnd;
             } else {
-                mergedSegments[i].end = mergedSegments[i].start + 2;
+                mergedSegments[i].end = mergedSegments[i].start + 3;
                 if (duration && mergedSegments[i].end > duration) {
                     mergedSegments[i].end = duration;
                 }
@@ -1289,9 +1296,15 @@ export const alignDraftWithAudio = async (
                 nextStart = mergedSegments[i].start + 1;
                 mergedSegments[i+1].start = nextStart;
             }
-            mergedSegments[i].end = nextStart - 0.001;
+            
+            // Calculate a reasonable end time (e.g., 3 seconds or before the next segment)
+            let calculatedEnd = mergedSegments[i].start + 3;
+            if (calculatedEnd > nextStart) {
+                calculatedEnd = nextStart - 0.001;
+            }
+            mergedSegments[i].end = calculatedEnd;
         } else {
-            mergedSegments[i].end = mergedSegments[i].start + 2;
+            mergedSegments[i].end = mergedSegments[i].start + 3;
             if (duration && mergedSegments[i].end > duration) {
                 mergedSegments[i].end = duration;
             }
