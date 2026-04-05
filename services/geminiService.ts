@@ -455,14 +455,15 @@ async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], 
         ${draftFormatted}
         
         Task: Match EVERY line from the DRAFT to the RAW transcript to find its start time.
-        If a draft line doesn't perfectly match the raw text, interpolate or calculate the correct start time based on surrounding matched lines.
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
         3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
         4. The 'start' times MUST be monotonically increasing (each line's start time must be >= the previous line's start time).
-        5. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
+        5. PROPORTIONAL INTERPOLATION: If a DRAFT line matches only the MIDDLE or END of a RAW transcript segment, you MUST mathematically calculate the 'start' time based on its character position within the raw text. 
+           - Example: If RAW is "no matter how much you shake swirl or stir it" (start: 10.0, end: 20.0) and DRAFT is "or stir it", the start time should be proportionally calculated (e.g., ~17.0). DO NOT just use the raw start time 10.0.
+        6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
         
         let parsed: any[] = [];
         let attempts = 0;
