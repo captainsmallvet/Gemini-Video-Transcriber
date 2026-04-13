@@ -433,10 +433,11 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
 
-async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<any[]> {
+async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const chunkSize = 100; // Process 100 draft lines at a time
     let allAligned: any[] = [];
+    let debugLogs: any[] = [];
     
     for (let i = 0; i < draftLines.length; i += chunkSize) {
         const chunkLines = draftLines.slice(i, i + chunkSize);
@@ -467,6 +468,7 @@ async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], 
         
         let parsed: any[] = [];
         let attempts = 0;
+        let lastError = "";
         while (parsed.length === 0 && attempts < 3) {
             try {
                 const response = await ai.models.generateContent({
@@ -484,22 +486,41 @@ async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], 
                                 },
                                 required: ["lineIndex", "start"]
                             }
-                        }
+                        },
+                        safetySettings: [
+                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+                        ]
                     }
                 });
                 const resultText = response.text || "[]";
+                debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: resultText });
+                
                 let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                 const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                 if (jsonMatch) jsonString = jsonMatch[0];
                 parsed = JSON.parse(jsonString);
-            } catch (e) {
-                console.error("Alignment failed", e);
+                
+                if (parsed.length === 0) {
+                    console.warn("AI returned an empty array for alignment. Retrying...");
+                    lastError = "AI returned an empty array";
+                }
+            } catch (e: any) {
+                console.error("Alignment failed on attempt", attempts + 1, e);
+                lastError = e.message || String(e);
             }
             attempts++;
         }
+        
+        if (parsed.length === 0) {
+            debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: `FAILED AFTER 3 ATTEMPTS. Last error: ${lastError}` });
+        }
+        
         allAligned.push(...parsed);
     }
-    return allAligned;
+    return { aligned: allAligned, debugLogs };
 }
 
 export const transcribeVideo = async (
@@ -827,7 +848,9 @@ export const alignDraftWithAudio = async (
         const rawSegments = JSON.parse(rawResult.data);
 
         reportProgress("Step 2: Aligning draft with extracted vision subtitles...");
-        const alignedParsed = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress);
+        const alignmentResult = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress);
+        const alignedParsed = alignmentResult.aligned;
+        const alignmentDebugLogs = alignmentResult.debugLogs;
 
         let lastValidTime = 0;
         const continuousSegments: any[] = lines.map((text, idx) => {
@@ -901,7 +924,7 @@ export const alignDraftWithAudio = async (
             data: JSON.stringify(mergedSegments), 
             rawVisionData: rawResult.data,
             retryLog: rawResult.retryLog,
-            debugLogs: rawResult.debugLogs
+            debugLogs: [...(rawResult.debugLogs || []), ...alignmentDebugLogs]
         };
     }
 
