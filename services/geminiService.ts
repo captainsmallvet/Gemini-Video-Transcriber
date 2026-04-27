@@ -441,6 +441,102 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
 
+export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
+    const chunkSize = 50; 
+    let allAligned: any[] = [];
+    let debugLogs: any[] = [];
+    
+    for (let i = 0; i < missingLines.length; i += chunkSize) {
+        const chunkLines = missingLines.slice(i, i + chunkSize);
+        
+        const draftFormatted = chunkLines.map(l => `[${l.index}] ${l.text}`).join('\n');
+        
+        reportProgress(`Retrying alignment for missing lines (${i + 1} to ${Math.min(i + chunkSize, missingLines.length)} of ${missingLines.length})...`);
+        
+        const promptText = `You are an expert text aligner filling in gaps.
+        I have a RAW transcript extracted from video OCR (with exact start/end times) and a list of MISSING DRAFT lines that need alignment.
+        
+        RAW TRANSCRIPT (JSON):
+        ${JSON.stringify(rawSegments)}
+        
+        MISSING DRAFT LINES TO ALIGN:
+        ${draftFormatted}
+        
+        Task: Match EVERY line from the MISSING DRAFT LINES to the RAW transcript to find its start time.
+        
+        CRITICAL RULES:
+        1. You MUST include EVERY line from the provided MISSING DRAFT LINES.
+        2. 'lineIndex' MUST exactly match the index provided in brackets in the draft (e.g., if draft says "[15] Hello", lineIndex must be 15).
+        3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
+        4. Return ONLY valid JSON in this format: [{"lineIndex": 15, "start": 2.155}, ...]`;
+        
+        let parsed: any[] | null = null;
+        let attempts = 0;
+        let lastError = "";
+        while ((parsed === null || parsed.length === 0) && attempts < 5) {
+            if (attempts > 0) {
+                const delayMs = Math.min(2000 * Math.pow(2, attempts - 1), 15000); 
+                console.log(`Waiting ${delayMs}ms before attempt ${attempts + 1}...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+            try {
+                const response = await ai.models.generateContent({
+                    model: modelName,
+                    contents: promptText,
+                    config: { 
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    lineIndex: { type: Type.NUMBER, description: "Exact index of the line as provided in the draft" },
+                                    start: { type: Type.NUMBER, description: "Start time in seconds" }
+                                },
+                                required: ["lineIndex", "start"]
+                            }
+                        },
+                        safetySettings: [
+                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+                        ]
+                    }
+                });
+                const resultText = response.text || "[]";
+                debugLogs.push({ chunk: i + 1, draftWindow: `Retrying ${chunkLines.length} lines`, aiResponse: resultText });
+                
+                let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                if (jsonMatch) jsonString = jsonMatch[0];
+                parsed = JSON.parse(jsonString);
+                
+                if (parsed && parsed.length === 0) {
+                    console.warn(`Attempt ${attempts + 1}: AI returned an empty array for missing lines. Retrying...`);
+                    lastError = "AI returned an empty array";
+                    parsed = null;
+                }
+            } catch (e: any) {
+                console.error("Missing lines alignment failed on attempt", attempts + 1, e);
+                lastError = e.message || String(e);
+            }
+            attempts++;
+        }
+        
+        if (parsed === null || parsed.length === 0) {
+            debugLogs.push({ chunk: i + 1, draftWindow: `Retrying ${chunkLines.length} lines`, aiResponse: `FAILED AFTER 5 ATTEMPTS. Last error: ${lastError}` });
+            console.warn(`Retry alignment chunk ${i + 1} failed after 5 attempts. Last error: ${lastError}`);
+            continue;
+        } else {
+            allAligned.push(...parsed);
+        }
+    }
+
+    return { aligned: allAligned, debugLogs };
+}
+
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const chunkSize = 50; // Reduced from 100 to 50 to prevent AI truncation/hallucination on large outputs

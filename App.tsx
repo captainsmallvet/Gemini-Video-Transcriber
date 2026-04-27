@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, processContinuousSegments } from './services/geminiService';
+import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, alignMissingLines, processContinuousSegments } from './services/geminiService';
 import Spinner from './components/Spinner';
 
 const App: React.FC = () => {
@@ -419,6 +419,74 @@ const App: React.FC = () => {
       setError(`Step 2 failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRetryMissingLines = async () => {
+    if (!draftText || !visionRawDataParsed || !alignedDataParsed) return;
+    
+    const keyToUse = activeApiKey || process.env.API_KEY;
+    if (!keyToUse) {
+      setError('Error: No API Key set.');
+      return;
+    }
+
+    const draftLines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const alignedIndices = new Set(alignedDataParsed.map((a: any) => a.lineIndex));
+    
+    const missingLines = [];
+    for (let i = 0; i < draftLines.length; i++) {
+        if (!alignedIndices.has(i + 1)) {
+            missingLines.push({ index: i + 1, text: draftLines[i] });
+        }
+    }
+
+    if (missingLines.length === 0) {
+        setAlignmentSummaryMsg(`✅ Success! All ${draftLines.length} lines are perfectly aligned. Nothing to retry.`);
+        return;
+    }
+
+    setIsLoading(true);
+    setProgressMessage(`Retrying alignment for ${missingLines.length} missing lines...`);
+    setError(null);
+
+    try {
+        const retryResult = await alignMissingLines(
+            missingLines,
+            visionRawDataParsed, 
+            selectedModel, 
+            keyToUse, 
+            (msg) => setProgressMessage(msg)
+        );
+        
+        // Merge old and new
+        const newAligned = [...alignedDataParsed, ...retryResult.aligned];
+        // Sort by lineIndex
+        newAligned.sort((a, b) => a.lineIndex - b.lineIndex);
+        
+        setAlignedDataParsed(newAligned);
+        setDebugLogs(prev => [...(prev || []), ...retryResult.debugLogs]);
+        
+        // Re-check
+        const newAlignedIndices = new Set(newAligned.map((a: any) => a.lineIndex));
+        const stillMissing = [];
+        for (let i = 1; i <= draftLines.length; i++) {
+            if (!newAlignedIndices.has(i)) stillMissing.push(i);
+        }
+        
+        let summaryMsg = "";
+        if (stillMissing.length > 0) {
+            summaryMsg = `⚠️ Retry finished: ${stillMissing.length} lines are still missing (Indices: ${stillMissing.slice(0, 5).join(', ')}${stillMissing.length > 5 ? '...' : ''}). Step 3 will automatically interpolate times for these gaps.`;
+        } else {
+            summaryMsg = `✅ Success! All ${draftLines.length} lines were perfectly aligned.`;
+        }
+        
+        setAlignmentSummaryMsg(summaryMsg);
+
+    } catch (err) {
+        setError(`Retry failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -940,13 +1008,25 @@ const App: React.FC = () => {
                         </div>
                     </div>
                     <div className="flex flex-col items-start gap-4">
-                        <button
-                          onClick={handleVisionStep2}
-                          disabled={!draftText || !visionRawDataParsed || isLoading}
-                          className="px-6 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50"
-                        >
-                          {isLoading && pipelineStep === 2 ? 'Aligning...' : 'Run Step 2'}
-                        </button>
+                        <div className="flex gap-4">
+                            <button
+                              onClick={handleVisionStep2}
+                              disabled={!draftText || !visionRawDataParsed || isLoading}
+                              className="px-6 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50"
+                            >
+                              {isLoading && pipelineStep === 2 && !progressMessage.includes('missing') ? 'Aligning...' : 'Run Step 2'}
+                            </button>
+                            
+                            {alignmentSummaryMsg && alignmentSummaryMsg.includes('⚠️') && (
+                                <button
+                                  onClick={handleRetryMissingLines}
+                                  disabled={!draftText || !visionRawDataParsed || !alignedDataParsed || isLoading}
+                                  className="px-6 py-2 bg-gradient-to-r from-yellow-600 to-yellow-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50"
+                                >
+                                  {isLoading && progressMessage.includes('Retrying') ? 'Retrying...' : 'Retry Missing Lines'}
+                                </button>
+                            )}
+                        </div>
                         {alignmentSummaryMsg && (
                             <div className={`text-sm p-2 rounded border mt-2 w-full ${alignmentSummaryMsg.includes('✅') ? 'bg-green-900 border-green-700 text-green-300' : 'bg-yellow-900 border-yellow-700 text-yellow-300'}`}>
                                 {alignmentSummaryMsg}
