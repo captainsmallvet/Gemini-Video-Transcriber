@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [pipelineStep, setPipelineStep] = useState<number>(1);
   const [visionRawDataParsed, setVisionRawDataParsed] = useState<any[] | null>(null);
   const [alignedDataParsed, setAlignedDataParsed] = useState<any[] | null>(null);
+  const [alignmentSummaryMsg, setAlignmentSummaryMsg] = useState<string | null>(null);
   const visionRawInputRef = useRef<HTMLInputElement>(null);
   const alignedDataInputRef = useRef<HTMLInputElement>(null);
 
@@ -380,11 +381,13 @@ const App: React.FC = () => {
     setProgressMessage('Aligning draft with raw vision data (Step 2)...');
     setError(null);
     setAlignedDataParsed(null);
+    setAlignmentSummaryMsg(null);
     setTranscript(null);
 
     try {
+      const draftLines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
       const alignmentResult = await alignTextWithRawVision(
-          draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0),
+          draftLines,
           visionRawDataParsed, 
           selectedModel, 
           keyToUse, 
@@ -394,6 +397,24 @@ const App: React.FC = () => {
       setAlignedDataParsed(alignmentResult.aligned);
       setDebugLogs(prev => [...(prev || []), ...alignmentResult.debugLogs]);
       setPipelineStep(3);
+
+      const alignedIndices = new Set(alignmentResult.aligned.map((a: any) => a.lineIndex));
+      const missingIndices = [];
+      for (let i = 1; i <= draftLines.length; i++) {
+          if (!alignedIndices.has(i)) {
+              missingIndices.push(i);
+          }
+      }
+      
+      let summaryMsg = "";
+      if (missingIndices.length > 0) {
+          summaryMsg = `⚠️ finished with skips: ${missingIndices.length} lines were skipped by AI (Indices: ${missingIndices.slice(0, 5).join(', ')}${missingIndices.length > 5 ? '...' : ''}). Step 3 will automatically interpolate times for these gaps based on surrounding lines.`;
+      } else {
+          summaryMsg = `✅ Success! All ${draftLines.length} lines were perfectly aligned.`;
+      }
+      
+      setAlignmentSummaryMsg(summaryMsg);
+
     } catch (err) {
       setError(`Step 2 failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -926,6 +947,11 @@ const App: React.FC = () => {
                         >
                           {isLoading && pipelineStep === 2 ? 'Aligning...' : 'Run Step 2'}
                         </button>
+                        {alignmentSummaryMsg && (
+                            <div className={`text-sm p-2 rounded border mt-2 w-full ${alignmentSummaryMsg.includes('✅') ? 'bg-green-900 border-green-700 text-green-300' : 'bg-yellow-900 border-yellow-700 text-yellow-300'}`}>
+                                {alignmentSummaryMsg}
+                            </div>
+                        )}
                         {alignedDataParsed && (
                            <div className="flex flex-col gap-2 w-full mt-2">
                              <div className="flex justify-between items-center">
