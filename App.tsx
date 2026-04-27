@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, alignMissingLines, processContinuousSegments } from './services/geminiService';
+import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, alignMissingLines, processContinuousSegments, retryVisionChunks, cleanSegments } from './services/geminiService';
 import Spinner from './components/Spinner';
 
 const App: React.FC = () => {
@@ -58,6 +58,36 @@ const App: React.FC = () => {
       }
   }, [transcriptionMode]);
   
+  useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch (err: any) {
+        console.error(`${err.name}, ${err.message}`);
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (wakeLock !== null) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    };
+
+    if (isLoading) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isLoading]);
+
   // Model Selection State
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
   const models = [
@@ -362,6 +392,70 @@ const App: React.FC = () => {
       setPipelineStep(2);
     } catch (err) {
       setError(`Step 1 failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRetryVisionChunks = async () => {
+    if (!videoFile || !visionRawDataParsed) return;
+    const failedChunks = retrySummary.filter(log => !log.success).map(log => log.chunk - 1); // 0-indexed
+    if (failedChunks.length === 0) return;
+
+    const keyToUse = activeApiKey || process.env.API_KEY;
+    if (!keyToUse) return;
+
+    setIsLoading(true);
+    setProgressMessage(`Retrying ${failedChunks.length} failed chunks...`);
+    setError(null);
+
+    try {
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: 'vision' as const, fps: frameRate, timeCompensation };
+      const retryResult = await retryVisionChunks(
+          videoFile,
+          selectedModel, 
+          keyToUse, 
+          (msg) => setProgressMessage(msg),
+          failedChunks,
+          options
+      );
+      
+      const newSegments = retryResult.newSegments;
+      
+      if (retryResult.debugLogs) {
+        setDebugLogs(prev => [...(prev || []), ...(retryResult.debugLogs || [])]);
+      }
+      
+      let newRetrySummary = [...retrySummary];
+      retryResult.retryLog.forEach((log: any) => {
+         const idx = newRetrySummary.findIndex(r => r.chunk === log.chunk);
+         if (idx >= 0) newRetrySummary[idx] = log;
+         else newRetrySummary.push(log);
+      });
+      setRetrySummary(newRetrySummary);
+
+      if (newSegments.length > 0) {
+          const mergedRaw = [...visionRawDataParsed, ...newSegments];
+          const cleaned = cleanSegments(mergedRaw);
+          const deduplicated = [];
+          for (const seg of cleaned) {
+              const isDuplicate = deduplicated.some(d => Math.abs(d.start - seg.start) < 2 && d.text === seg.text);
+              if (!isDuplicate) deduplicated.push(seg);
+          }
+          setVisionRawDataParsed(deduplicated);
+      }
+      
+      const stillFailed = newRetrySummary.filter(log => !log.success);
+      if (stillFailed.length > 0) {
+          setShowSummaryModal(true);
+      } else {
+          setShowSummaryModal(false);
+          setProgressMessage(`All failed chunks successfully recovered!`);
+          setTimeout(() => setProgressMessage(''), 4000);
+      }
+
+    } catch (err) {
+      setError(`Retry failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -966,29 +1060,38 @@ const App: React.FC = () => {
                         >
                           {isLoading && pipelineStep === 1 ? 'Extracting...' : 'Run Step 1'}
                         </button>
-                        {visionRawDataParsed && (
-                           <div className="flex flex-col gap-2 w-full mt-2">
-                             <div className="flex justify-between items-center">
-                               <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
-                                 Save vision_raw_data.json
-                               </button>
-                               <span className="text-xs text-gray-500 italic flex-1 ml-4 text-right">Note: Contains Raw text from OCR limits. Gaps are normal.</span>
-                             </div>
-                             <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
-                               {JSON.stringify(visionRawDataParsed, null, 2)}
-                             </div>
-                           </div>
+                        {visionRawDataParsed && retrySummary.some(log => !log.success) && (
+                          <button
+                            onClick={handleRetryVisionChunks}
+                            disabled={isLoading}
+                            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded shadow transition-all disabled:opacity-50 whitespace-nowrap"
+                          >
+                            Retry Failed Chunks
+                          </button>
                         )}
                         {visionRawDataParsed && (
                            <button onClick={() => {
                                setSegments(visionRawDataParsed);
                                setTranscript(JSON.stringify(visionRawDataParsed, null, 2));
                                setPipelineStep(3); // Jump to transcript view
-                           }} className="text-gray-300 hover:text-white text-sm font-semibold ml-auto border border-gray-600 px-3 py-1 rounded self-start mt-2 sm:mt-0">
+                           }} className="text-gray-300 hover:text-white text-sm font-semibold ml-auto border border-gray-600 px-3 py-1 rounded">
                              Skip to SRT (Auto Transcribe)
                            </button>
                         )}
                     </div>
+                    {visionRawDataParsed && (
+                       <div className="flex flex-col gap-2 w-full mt-4">
+                         <div className="flex justify-between items-center">
+                           <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
+                             Save vision_raw_data.json
+                           </button>
+                           <span className="text-xs text-gray-500 italic flex-1 ml-4 text-right">Note: Contains Raw text from OCR limits. Gaps are normal.</span>
+                         </div>
+                         <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
+                           {JSON.stringify(visionRawDataParsed, null, 2)}
+                         </div>
+                       </div>
+                    )}
                 </div>
 
                  {/* Step 2 */}
@@ -1296,7 +1399,18 @@ const App: React.FC = () => {
                 ))}
               </div>
             </div>
-            <div className="p-4 border-t border-gray-700 bg-gray-900 flex justify-end">
+            <div className="p-4 border-t border-gray-700 bg-gray-900 flex justify-end gap-3">
+              {transcriptionMode === 'vision' && retrySummary.some(log => !log.success) && (
+                <button
+                  onClick={() => {
+                      setShowSummaryModal(false);
+                      handleRetryVisionChunks();
+                  }}
+                  className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-lg transition-colors"
+                >
+                  Retry Failed Chunks
+                </button>
+              )}
               <button 
                 onClick={() => setShowSummaryModal(false)}
                 className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors"

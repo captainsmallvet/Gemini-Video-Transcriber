@@ -81,7 +81,7 @@ const normalizeTimestamps = (parsedData: any[], actualChunkDuration: number): an
     return validData;
 };
 
-const applyTimeCompensation = (segments: any[], compensation: number) => {
+export const applyTimeCompensation = (segments: any[], compensation: number) => {
     if (!compensation || compensation === 0) return segments;
     return segments.map(seg => {
         let newStart = seg.start - compensation;
@@ -102,7 +102,7 @@ const applyTimeCompensation = (segments: any[], compensation: number) => {
     });
 };
 
-const cleanSegments = (segments: any[]) => {
+export const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
     
@@ -439,6 +439,132 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
     const finalSegments = applyTimeCompensation(deduplicated, options?.timeCompensation || 0);
 
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
+}
+
+export async function retryVisionChunks(mediaFile: File, modelName: string, apiKey: string, reportProgress: (msg: string) => void, chunksToRetry: number[], options?: TranscriptionOptions): Promise<{ newSegments: any[], retryLog: any[], debugLogs: any[] }> {
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
+    const duration = await getVideoDuration(mediaFile);
+    const chunkDurationSec = options?.chunkLength || 30;
+    const overlapSec = options?.overlapTime || 1;
+    const fps = options?.fps || 5;
+    const delayTimeMs = (options?.delayTime || 5) * 1000;
+    const totalChunks = Math.ceil(duration / chunkDurationSec);
+
+    let allSegments: any[] = [];
+    const retryLog: any[] = [];
+    const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
+
+    for (let c = 0; c < chunksToRetry.length; c++) {
+        const i = chunksToRetry[c];
+        const startTimeSec = i * chunkDurationSec;
+        const endTimeSec = Math.min(startTimeSec + chunkDurationSec + overlapSec, duration);
+        
+        reportProgress(`Retrying Vision Chunk ${i + 1}/${totalChunks} (${startTimeSec}s - ${endTimeSec}s)... [${c + 1}/${chunksToRetry.length}]`);
+        
+        let frames: string[] = [];
+        try {
+            frames = await extractVideoFramesForChunk(mediaFile, startTimeSec, endTimeSec, fps, reportProgress);
+        } catch (e) {
+            console.error("Failed to extract frames", e);
+            continue;
+        }
+        
+        const parts: any[] = [];
+        frames.forEach((f, index) => {
+            const frameTime = startTimeSec + (index / fps);
+            parts.push({ text: `[Timestamp: ${frameTime.toFixed(2)}s]` });
+            parts.push({ inlineData: { mimeType: 'image/jpeg', data: f } });
+        });
+        
+        const promptText = `You are a highly accurate OCR system.
+        I am providing a sequence of video frames. Before each frame, I have provided its exact timestamp in seconds (e.g., [Timestamp: 12.50s]).
+        
+        Task: Read the subtitles on the screen.
+        Return a JSON array of objects representing each subtitle shown.
+        
+        CRITICAL RULES:
+        1. 'text': The exact text of the subtitle. IF A SUBTITLE SPANS MULTIPLE LINES ON THE SCREEN, COMBINE THEM INTO A SINGLE STRING SEPARATED BY A SPACE. DO NOT output multiple JSON objects for the same on-screen subtitle block.
+        2. 'start': The EXACT timestamp (in RAW SECONDS, e.g., 62.5) when this subtitle FIRST appears. Use the [Timestamp: X.XXs] label provided before the frame.
+        3. 'end': The EXACT timestamp (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
+        4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
+        5. DO NOT hallucinate, guess, or auto-complete text. ONLY transcribe text that is clearly visible in the provided frames. If a sentence is cut off at the end of the frames, transcribe ONLY the visible portion.
+        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles, even if they look similar to previous ones but contain different words.
+        7. NEVER assign the exact same 'start' and 'end' time to multiple distinct subtitles. Each distinct subtitle must have its own unique time range corresponding to when it is actually visible.
+        8. If you reach the last frame provided, STOP. DO NOT transcribe text that you expect to come next but is not visible in the current frames.
+        9. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
+        
+        parts.push({ text: promptText });
+
+        let parsed: any[] | null = null;
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        while (parsed === null && attempts < maxAttempts) {
+            if (attempts > 0) {
+                reportProgress(`Chunk ${i + 1} failed, retrying in 5s...`);
+                await new Promise(r => setTimeout(r, 5000));
+            }
+            try {
+                const response = await ai.models.generateContent({
+                    model: modelName,
+                    contents: { parts },
+                    config: { 
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    text: { type: Type.STRING, description: "The exact text of the subtitle" },
+                                    start: { type: Type.NUMBER, description: "Start time in seconds" },
+                                    end: { type: Type.NUMBER, description: "End time in seconds" }
+                                },
+                                required: ["text", "start", "end"]
+                            }
+                        },
+                        safetySettings: [
+                            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+                        ]
+                    }
+                });
+                const resultText = response.text || "[]";
+                debugLogs.push({ chunk: i + 1, draftWindow: "Vision Mode (Retry)", aiResponse: resultText });
+                let jsonString = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
+                if (jsonMatch) jsonString = jsonMatch[0];
+                parsed = JSON.parse(jsonString);
+            } catch (e) {
+                console.error("Vision chunk retry failed", e);
+            }
+            attempts++;
+        }
+        
+        if (parsed !== null) {
+            retryLog.push({ chunk: i + 1, attempts, success: true });
+            if (parsed.length > 0) {
+                allSegments.push(...parsed);
+            }
+        } else {
+            retryLog.push({ chunk: i + 1, attempts, success: false });
+        }
+        
+        if (c < chunksToRetry.length - 1) {
+            await new Promise(r => setTimeout(r, delayTimeMs));
+        }
+    }
+
+    const cleaned = cleanSegments(allSegments);
+    const deduplicated = [];
+    for (const seg of cleaned) {
+        const isDuplicate = deduplicated.some(d => d.text === seg.text && Math.abs(d.start - seg.start) < 2);
+        if (!isDuplicate) deduplicated.push(seg);
+    }
+    const finalSegments = applyTimeCompensation(deduplicated, options?.timeCompensation || 0);
+
+    return { newSegments: finalSegments, retryLog, debugLogs };
 }
 
 export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
