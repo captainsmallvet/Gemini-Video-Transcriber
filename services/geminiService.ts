@@ -477,7 +477,13 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         let parsed: any[] | null = null;
         let attempts = 0;
         let lastError = "";
-        while ((parsed === null || parsed.length === 0) && attempts < 3) {
+        while ((parsed === null || parsed.length === 0) && attempts < 5) {
+            if (attempts > 0) {
+                // Exponential backoff for retries, especially helpful for 503 Service Unavailable errors
+                const delayMs = Math.min(2000 * Math.pow(2, attempts - 1), 15000); 
+                console.log(`Waiting ${delayMs}ms before attempt ${attempts + 1}...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
             try {
                 const response = await ai.models.generateContent({
                     model: modelName,
@@ -523,9 +529,11 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
             attempts++;
         }
         
-        if (parsed === null) {
-            debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: `FAILED AFTER 3 ATTEMPTS. Last error: ${lastError}` });
-            throw new Error(`Alignment chunk ${i + 1} failed after 3 attempts. Last error: ${lastError}`);
+        if (parsed === null || parsed.length === 0) {
+            debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: `FAILED AFTER 5 ATTEMPTS. Last error: ${lastError}` });
+            console.warn(`Alignment chunk ${i + 1} failed after 5 attempts. Skipping to preserve progress. Missing lines will be interpolated. Last error: ${lastError}`);
+            // Continue instead of throwing, so the user doesn't lose all previously aligned chunks!
+            continue;
         } else {
             allAligned.push(...parsed);
         }
