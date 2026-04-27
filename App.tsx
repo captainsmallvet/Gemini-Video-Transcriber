@@ -388,12 +388,14 @@ const App: React.FC = () => {
 
     try {
       const draftLines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: 'vision' as const, fps: frameRate, timeCompensation };
       const alignmentResult = await alignTextWithRawVision(
           draftLines,
           visionRawDataParsed, 
           selectedModel, 
           keyToUse, 
-          (msg) => setProgressMessage(msg)
+          (msg) => setProgressMessage(msg),
+          options
       );
       
       setAlignedDataParsed(alignmentResult.aligned);
@@ -453,12 +455,14 @@ const App: React.FC = () => {
     setError(null);
 
     try {
+        const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: 'vision' as const, fps: frameRate, timeCompensation };
         const retryResult = await alignMissingLines(
             missingLines,
             visionRawDataParsed, 
             selectedModel, 
             keyToUse, 
-            (msg) => setProgressMessage(msg)
+            (msg) => setProgressMessage(msg),
+            options
         );
         
         // Merge old and new

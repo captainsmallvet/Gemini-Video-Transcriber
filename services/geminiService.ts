@@ -441,13 +441,19 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
 
-export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
+export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const chunkSize = 50; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
     for (let i = 0; i < missingLines.length; i += chunkSize) {
+        if (i > 0) {
+            const delayMs = (options?.delayTime || 15) * 1000;
+            reportProgress(`Waiting ${options?.delayTime || 15} seconds before retrying next chunk...`);
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+
         const chunkLines = missingLines.slice(i, i + chunkSize);
         
         const draftFormatted = chunkLines.map(l => `[${l.index}] ${l.text}`).join('\n');
@@ -537,13 +543,19 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
     return { aligned: allAligned, debugLogs };
 }
 
-export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
+export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const chunkSize = 50; // Reduced from 100 to 50 to prevent AI truncation/hallucination on large outputs
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
     for (let i = 0; i < draftLines.length; i += chunkSize) {
+        if (i > 0) {
+            const delayMs = (options?.delayTime || 15) * 1000;
+            reportProgress(`Waiting ${options?.delayTime || 15} seconds before aligning next chunk...`);
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+
         const chunkLines = draftLines.slice(i, i + chunkSize);
         const startIndex = i + 1;
         const draftFormatted = chunkLines.map((l, idx) => `[${startIndex + idx}] ${l}`).join('\n');
@@ -1042,7 +1054,7 @@ export const alignDraftWithAudio = async (
         const rawSegments = JSON.parse(rawResult.data);
 
         reportProgress("Step 2: Aligning draft with extracted vision subtitles...");
-        const alignmentResult = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress);
+        const alignmentResult = await alignTextWithRawVision(lines, rawSegments, modelName, apiKey, reportProgress, options);
         const alignedParsed = alignmentResult.aligned;
         const alignmentDebugLogs = alignmentResult.debugLogs;
 
