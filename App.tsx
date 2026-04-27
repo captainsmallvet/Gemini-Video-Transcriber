@@ -51,7 +51,7 @@ const App: React.FC = () => {
       } else {
           setChunkLength(60);
           setOverlapTime(2);
-          setDelayTime(10);
+          setDelayTime(15);
           setLookaheadLines(5);
           setFrameRate(2);
           setTimeCompensation(0.5);
