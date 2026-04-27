@@ -872,10 +872,13 @@ const App: React.FC = () => {
                           {isLoading && pipelineStep === 1 ? 'Extracting...' : 'Run Step 1'}
                         </button>
                         {visionRawDataParsed && (
-                           <div className="flex flex-col gap-2">
-                             <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
-                               Save vision_raw_data.json
-                             </button>
+                           <div className="flex flex-col gap-2 w-full mt-2">
+                             <div className="flex justify-between items-center">
+                               <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
+                                 Save vision_raw_data.json
+                               </button>
+                               <span className="text-xs text-gray-500 italic flex-1 ml-4 text-right">Note: Contains Raw text from OCR limits. Gaps are normal.</span>
+                             </div>
                              <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
                                {JSON.stringify(visionRawDataParsed, null, 2)}
                              </div>
@@ -893,7 +896,7 @@ const App: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Step 2 */}
+                 {/* Step 2 */}
                 <div className={`p-4 rounded-xl border ${pipelineStep >= 2 ? 'border-purple-500 bg-gray-800' : 'border-gray-700 bg-gray-900 bg-opacity-50 opacity-60'}`}>
                     <h3 className="text-xl font-bold text-purple-400 mb-2">Step 2: Alignment Phase</h3>
                     <p className="text-sm text-gray-400 mb-4">Matches your draft text (.txt) against the raw vision data. Requires uploading both if not coming from Step 1.</p>
@@ -915,7 +918,7 @@ const App: React.FC = () => {
                             )}
                         </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <div className="flex flex-col items-start gap-4">
                         <button
                           onClick={handleVisionStep2}
                           disabled={!draftText || !visionRawDataParsed || isLoading}
@@ -924,11 +927,14 @@ const App: React.FC = () => {
                           {isLoading && pipelineStep === 2 ? 'Aligning...' : 'Run Step 2'}
                         </button>
                         {alignedDataParsed && (
-                           <div className="flex flex-col gap-2 w-full mt-4">
-                             <button onClick={() => saveJSON(alignedDataParsed, 'aligned_data.json')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline text-left">
-                               Save aligned_data.json
-                             </button>
-                             <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
+                           <div className="flex flex-col gap-2 w-full mt-2">
+                             <div className="flex justify-between items-center">
+                               <button onClick={() => saveJSON(alignedDataParsed, 'aligned_data.json')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline text-left">
+                                 Save aligned_data.json
+                               </button>
+                               <span className="text-xs text-gray-500 italic">Note: Only contains timestamps. Text is added in Step 3.</span>
+                             </div>
+                             <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono relative">
                                {JSON.stringify(alignedDataParsed, null, 2)}
                              </div>
                            </div>
@@ -958,7 +964,7 @@ const App: React.FC = () => {
                             )}
                         </div>
                     </div>
-                    <div>
+                    <div className="flex flex-col items-start gap-4">
                         <button
                           onClick={handleVisionStep3}
                           disabled={!draftText || !alignedDataParsed || isLoading}
@@ -966,6 +972,11 @@ const App: React.FC = () => {
                         >
                           {isLoading && pipelineStep === 3 ? 'Processing...' : 'Run Step 3'}
                         </button>
+                        {segments && segments.length > 0 && (
+                            <div className="mt-2 text-sm text-gray-300">
+                                <span className="text-green-400 font-bold">✓ Complete.</span> Check the "Transcript" view below for the final SRT and JSON output.
+                            </div>
+                        )}
                     </div>
                 </div>
 

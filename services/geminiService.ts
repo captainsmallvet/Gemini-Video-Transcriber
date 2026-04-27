@@ -443,7 +443,7 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
 
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 100; // Process 100 draft lines at a time
+    const chunkSize = 50; // Reduced from 100 to 50 to prevent AI truncation/hallucination on large outputs
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
@@ -477,7 +477,7 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         let parsed: any[] | null = null;
         let attempts = 0;
         let lastError = "";
-        while (parsed === null && attempts < 3) {
+        while ((parsed === null || parsed.length === 0) && attempts < 3) {
             try {
                 const response = await ai.models.generateContent({
                     model: modelName,
@@ -510,6 +510,12 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                 const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                 if (jsonMatch) jsonString = jsonMatch[0];
                 parsed = JSON.parse(jsonString);
+                
+                if (parsed && parsed.length === 0) {
+                    console.warn(`Attempt ${attempts + 1}: AI returned an empty array for alignment. Retrying...`);
+                    lastError = "AI returned an empty array";
+                    parsed = null; // Force retry
+                }
             } catch (e: any) {
                 console.error("Alignment failed on attempt", attempts + 1, e);
                 lastError = e.message || String(e);
@@ -519,6 +525,7 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         
         if (parsed === null) {
             debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: `FAILED AFTER 3 ATTEMPTS. Last error: ${lastError}` });
+            throw new Error(`Alignment chunk ${i + 1} failed after 3 attempts. Last error: ${lastError}`);
         } else {
             allAligned.push(...parsed);
         }
