@@ -49,12 +49,12 @@ const App: React.FC = () => {
           setLookaheadLines(5);
           setTimeCompensation(0.5);
       } else {
-          setChunkLength(45);
-          setOverlapTime(1);
-          setDelayTime(5);
+          setChunkLength(60);
+          setOverlapTime(2);
+          setDelayTime(10);
           setLookaheadLines(5);
-          setFrameRate(4);
-          setTimeCompensation(0.25);
+          setFrameRate(2);
+          setTimeCompensation(0.5);
       }
   }, [transcriptionMode]);
   
