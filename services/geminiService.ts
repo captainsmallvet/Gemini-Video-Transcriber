@@ -359,11 +359,11 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
         
         parts.push({ text: promptText });
 
-        let parsed: any[] = [];
+        let parsed: any[] | null = null;
         let attempts = 0;
         const maxAttempts = 5;
 
-        while (parsed.length === 0 && attempts < maxAttempts) {
+        while (parsed === null && attempts < maxAttempts) {
             if (attempts > 0) {
                 reportProgress(`Chunk ${i + 1} failed, retrying in 5s...`);
                 await new Promise(r => setTimeout(r, 5000));
@@ -406,9 +406,11 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
             attempts++;
         }
         
-        if (parsed.length > 0) {
+        if (parsed !== null) {
             retryLog.push({ chunk: i + 1, attempts, success: true });
-            allSegments.push(...parsed);
+            if (parsed.length > 0) {
+                allSegments.push(...parsed);
+            }
         } else {
             retryLog.push({ chunk: i + 1, attempts, success: false });
         }
@@ -472,10 +474,10 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
            - Example: If RAW is "no matter how much you shake swirl or stir it" (start: 10.0, end: 20.0) and DRAFT is "or stir it", the start time should be proportionally calculated (e.g., ~17.0). DO NOT just use the raw start time 10.0.
         6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
         
-        let parsed: any[] = [];
+        let parsed: any[] | null = null;
         let attempts = 0;
         let lastError = "";
-        while (parsed.length === 0 && attempts < 3) {
+        while (parsed === null && attempts < 3) {
             try {
                 const response = await ai.models.generateContent({
                     model: modelName,
@@ -508,11 +510,6 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                 const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                 if (jsonMatch) jsonString = jsonMatch[0];
                 parsed = JSON.parse(jsonString);
-                
-                if (parsed.length === 0) {
-                    console.warn("AI returned an empty array for alignment. Retrying...");
-                    lastError = "AI returned an empty array";
-                }
             } catch (e: any) {
                 console.error("Alignment failed on attempt", attempts + 1, e);
                 lastError = e.message || String(e);
@@ -520,11 +517,11 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
             attempts++;
         }
         
-        if (parsed.length === 0) {
+        if (parsed === null) {
             debugLogs.push({ chunk: i + 1, draftWindow: `Lines ${startIndex}-${startIndex + chunkLines.length - 1}`, aiResponse: `FAILED AFTER 3 ATTEMPTS. Last error: ${lastError}` });
+        } else {
+            allAligned.push(...parsed);
         }
-        
-        allAligned.push(...parsed);
     }
     return { aligned: allAligned, debugLogs };
 }
@@ -630,11 +627,11 @@ export const transcribeVideo = async (
             const textPart = { text: promptText };
             parts.push(textPart);
 
-            let parsed: any[] = [];
+            let parsed: any[] | null = null;
             let attempts = 0;
             const maxAttempts = 5; // Increased to 5 for better resilience
 
-            while (parsed.length === 0 && attempts < maxAttempts) {
+            while (parsed === null && attempts < maxAttempts) {
                 if (attempts > 0) {
                     reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 5 seconds (attempt ${attempts + 1})...`);
                     // Add a 5-second delay before retrying to handle rate limits / server overload
@@ -683,8 +680,12 @@ export const transcribeVideo = async (
                         jsonString = jsonMatch[0];
                     }
                     const parsedData = JSON.parse(jsonString);
-                    if (Array.isArray(parsedData) && parsedData.length > 0) {
-                        parsed = normalizeTimestamps(parsedData, actualChunkDuration);
+                    if (Array.isArray(parsedData)) {
+                        if (parsedData.length > 0) {
+                            parsed = normalizeTimestamps(parsedData, actualChunkDuration);
+                        } else {
+                            parsed = []; // Empty array represents silence
+                        }
                     }
                 } catch (e) {
                     console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
@@ -692,9 +693,10 @@ export const transcribeVideo = async (
                 attempts++;
             }
 
-            if (parsed.length > 0) {
+            if (parsed !== null) {
                 retryLog.push({ chunk: i + 1, attempts, success: true });
-                const timeOffset = i * chunkDurationSec;
+                if (parsed.length > 0) {
+                    const timeOffset = i * chunkDurationSec;
                     
                     // We no longer filter out the overlap region blindly, as it caused missing segments.
                     // Instead, we keep all segments and let cleanSegments handle deduplication.
@@ -713,6 +715,7 @@ export const transcribeVideo = async (
                         };
                     });
                     allSegments.push(...adjustedSegments);
+                }
             } else {
                 // If it completely failed after all retries, insert a placeholder so the user knows there's a gap
                 retryLog.push({ chunk: i + 1, attempts, success: false });
@@ -1107,11 +1110,11 @@ export const alignDraftWithAudio = async (
             const textPart = { text: promptText };
             parts.push(textPart);
 
-            let parsed: any[] = [];
+            let parsed: any[] | null = null;
             let attempts = 0;
             const maxAttempts = 5;
 
-            while (parsed.length === 0 && attempts < maxAttempts) {
+            while (parsed === null && attempts < maxAttempts) {
                 if (attempts > 0) {
                     reportProgress(`Chunk ${i + 1} returned empty or failed, retrying in 5 seconds (attempt ${attempts + 1})...`);
                     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -1156,15 +1159,19 @@ export const alignDraftWithAudio = async (
                     const jsonMatch = jsonString.match(/\[[\s\S]*\]/);
                     if (jsonMatch) jsonString = jsonMatch[0];
                     const parsedData = JSON.parse(jsonString);
-                    if (Array.isArray(parsedData) && parsedData.length > 0) {
-                        // Normalize timestamps to handle AI hallucinations (e.g., 102.5 -> 62.5)
-                        const normalizedData = normalizeTimestamps(parsedData, actualChunkDuration);
-                        
-                        // Convert 1-based index back to 0-based index for internal logic
-                        parsed = normalizedData.map(item => ({
-                            ...item,
-                            lineIndex: item.lineIndex - 1
-                        }));
+                    if (Array.isArray(parsedData)) {
+                        if (parsedData.length > 0) {
+                            // Normalize timestamps to handle AI hallucinations (e.g., 102.5 -> 62.5)
+                            const normalizedData = normalizeTimestamps(parsedData, actualChunkDuration);
+                            
+                            // Convert 1-based index back to 0-based index for internal logic
+                            parsed = normalizedData.map(item => ({
+                                ...item,
+                                lineIndex: item.lineIndex - 1
+                            }));
+                        } else {
+                            parsed = [];
+                        }
                     }
                 } catch (e) {
                     console.error(`Attempt ${attempts + 1} failed for chunk ${i+1}`, e);
@@ -1172,11 +1179,12 @@ export const alignDraftWithAudio = async (
                 attempts++;
             }
 
-            if (parsed.length > 0) {
+            if (parsed !== null) {
                 retryLog.push({ chunk: i + 1, attempts, success: true });
-                const timeOffset = i * chunkDurationSec;
-                
-                // Post-processing: Check for unrealistically short durations between lines
+                if (parsed.length > 0) {
+                    const timeOffset = i * chunkDurationSec;
+                    
+                    // Post-processing: Check for unrealistically short durations between lines
                 // and discard edges (trust the middle)
                 let validParsed = parsed;
                 
@@ -1231,6 +1239,7 @@ export const alignDraftWithAudio = async (
                 
                 if (maxIndexInChunk > lastMatchedLineIndex) {
                     lastMatchedLineIndex = maxIndexInChunk;
+                }
                 }
             } else {
                 retryLog.push({ chunk: i + 1, attempts, success: false });
