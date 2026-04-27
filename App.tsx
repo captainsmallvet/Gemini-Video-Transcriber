@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { transcribeVideo, alignDraftWithAudio } from './services/geminiService';
+import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, processContinuousSegments } from './services/geminiService';
 import Spinner from './components/Spinner';
 
 const App: React.FC = () => {
@@ -25,6 +25,14 @@ const App: React.FC = () => {
   const [frameRate, setFrameRate] = useState<number>(2);
   const [timeCompensation, setTimeCompensation] = useState<number>(0.5);
   const [visionRawData, setVisionRawData] = useState<string>('');
+  
+  // Pipeline Step States
+  const [pipelineStep, setPipelineStep] = useState<number>(1);
+  const [visionRawDataParsed, setVisionRawDataParsed] = useState<any[] | null>(null);
+  const [alignedDataParsed, setAlignedDataParsed] = useState<any[] | null>(null);
+  const visionRawInputRef = useRef<HTMLInputElement>(null);
+  const alignedDataInputRef = useRef<HTMLInputElement>(null);
+
   const [chunkLength, setChunkLength] = useState<number>(90);
   const [overlapTime, setOverlapTime] = useState<number>(30);
   const [delayTime, setDelayTime] = useState<number>(5);
@@ -313,6 +321,136 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVisionStep1 = async () => {
+    if (!videoFile) return;
+
+    const keyToUse = activeApiKey || process.env.API_KEY;
+    if (!keyToUse || keyToUse === 'undefined' || keyToUse === 'no API key') {
+      setError('Error: No API Key set. Please enter your API key.');
+      return;
+    }
+
+    setIsLoading(true);
+    setProgressMessage('Extracting raw vision data (Step 1)...');
+    setError(null);
+    setRetrySummary([]);
+    setDebugLogs([]);
+    setVisionRawDataParsed(null);
+    setAlignedDataParsed(null);
+    setTranscript(null);
+
+    try {
+      const options = { chunkLength, overlapTime, delayTime, lookaheadLines, useVideoOcr, mode: 'vision' as const, fps: frameRate, timeCompensation };
+      const rawResult = await transcribeVideoVisionOnly(videoFile, selectedModel, keyToUse, (msg) => setProgressMessage(msg), options);
+      
+      let parsed = [];
+      try { parsed = JSON.parse(rawResult.data); } catch(e) {}
+      
+      setVisionRawDataParsed(parsed);
+      if (rawResult.debugLogs) setDebugLogs(rawResult.debugLogs);
+      
+      const hasRetriesOrFailures = rawResult.retryLog && rawResult.retryLog.some((log: any) => log.attempts > 1 || !log.success);
+      if (hasRetriesOrFailures) {
+          setRetrySummary(rawResult.retryLog);
+          setShowSummaryModal(true);
+      }
+      setPipelineStep(2);
+    } catch (err) {
+      setError(`Step 1 failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVisionStep2 = async () => {
+    if (!draftText || !visionRawDataParsed) {
+        setError('Error: Both Draft Text and Vision Raw Data are required for Step 2.');
+        return;
+    }
+
+    const keyToUse = activeApiKey || process.env.API_KEY;
+    if (!keyToUse) {
+      setError('Error: No API Key set.');
+      return;
+    }
+
+    setIsLoading(true);
+    setProgressMessage('Aligning draft with raw vision data (Step 2)...');
+    setError(null);
+    setAlignedDataParsed(null);
+    setTranscript(null);
+
+    try {
+      const alignmentResult = await alignTextWithRawVision(
+          draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0),
+          visionRawDataParsed, 
+          selectedModel, 
+          keyToUse, 
+          (msg) => setProgressMessage(msg)
+      );
+      
+      setAlignedDataParsed(alignmentResult.aligned);
+      setDebugLogs(prev => [...(prev || []), ...alignmentResult.debugLogs]);
+      setPipelineStep(3);
+    } catch (err) {
+      setError(`Step 2 failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVisionStep3 = () => {
+    if (!draftText || !alignedDataParsed) {
+        setError('Error: Both Draft Text and Aligned Data are required for Step 3.');
+        return;
+    }
+    
+    setIsLoading(true);
+    setProgressMessage('Generating continuous segments (Step 3)...');
+    setError(null);
+    
+    try {
+        const finalSegments = processContinuousSegments(draftText, alignedDataParsed, videoDuration);
+        setSegments(finalSegments);
+        setTranscript(JSON.stringify(finalSegments, null, 2));
+    } catch (err) {
+        setError(`Step 3 failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const handleJSONUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: React.Dispatch<React.SetStateAction<any[] | null>>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          const file = e.target.files[0];
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              try {
+                  if (event.target && typeof event.target.result === 'string') {
+                    const parsed = JSON.parse(event.target.result);
+                    setter(parsed);
+                    setError(null);
+                  }
+              } catch (err) {
+                  setError('Failed to parse uploaded JSON file.');
+              }
+          };
+          reader.readAsText(file);
+      }
+  };
+
+  const saveJSON = (data: any[] | null, filename: string) => {
+      if (!data) return;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
   };
 
   const removeFile = () => {
@@ -718,22 +856,129 @@ const App: React.FC = () => {
 
           {error && <p className="text-red-400 bg-red-900 bg-opacity-50 p-3 rounded-lg text-center">{error}</p>}
           
-          <div className="flex flex-col sm:flex-row justify-center gap-4 mt-8">
-            <button
-              onClick={handleTranscribe}
-              disabled={!videoFile || isLoading}
-              className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
-            >
-              {isLoading && !draftText ? 'Transcribing...' : 'Auto Transcribe'}
-            </button>
-            <button
-              onClick={handleAlignDraft}
-              disabled={!videoFile || !draftText || isLoading}
-              className="px-8 py-3 bg-gradient-to-r from-purple-500 to-purple-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
-              title={!draftText ? "Upload a draft .txt file first" : ""}
-            >
-              {isLoading && draftText ? 'Aligning...' : 'Transcribe from Draft'}
-            </button>
+          <div className="mt-8 border-t border-gray-700 pt-6">
+            {transcriptionMode === 'vision' ? (
+              <div className="space-y-6">
+                {/* Step 1 */}
+                <div className={`p-4 rounded-xl border ${pipelineStep >= 1 ? 'border-blue-500 bg-gray-800' : 'border-gray-700 bg-gray-900 bg-opacity-50 opacity-60'}`}>
+                    <h3 className="text-xl font-bold text-blue-400 mb-2">Step 1: Extract Raw Data (Auto Transcribe)</h3>
+                    <p className="text-sm text-gray-400 mb-4">Extracts timestamps from video OCR. Can be used standalone as 'Auto Transcribe' or as input for Step 2.</p>
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <button
+                          onClick={handleVisionStep1}
+                          disabled={!videoFile || isLoading}
+                          className="px-6 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {isLoading && pipelineStep === 1 ? 'Extracting...' : 'Run Step 1'}
+                        </button>
+                        {visionRawDataParsed && (
+                           <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline">
+                             Save vision_raw_data.json
+                           </button>
+                        )}
+                        {visionRawDataParsed && (
+                           <button onClick={() => {
+                               setSegments(visionRawDataParsed);
+                               setTranscript(JSON.stringify(visionRawDataParsed, null, 2));
+                               setPipelineStep(3); // Jump to transcript view
+                           }} className="text-gray-300 hover:text-white text-sm font-semibold ml-auto border border-gray-600 px-3 py-1 rounded">
+                             Skip to SRT (Auto Transcribe)
+                           </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Step 2 */}
+                <div className={`p-4 rounded-xl border ${pipelineStep >= 2 ? 'border-purple-500 bg-gray-800' : 'border-gray-700 bg-gray-900 bg-opacity-50 opacity-60'}`}>
+                    <h3 className="text-xl font-bold text-purple-400 mb-2">Step 2: Alignment Phase</h3>
+                    <p className="text-sm text-gray-400 mb-4">Matches your draft text (.txt) against the raw vision data. Requires uploading both if not coming from Step 1.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 bg-gray-900 p-3 rounded">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Vision Raw Data (JSON)</label>
+                            {visionRawDataParsed ? (
+                                <div className="text-sm text-green-400">✓ Loaded ({visionRawDataParsed.length} segments)</div>
+                            ) : (
+                                <input type="file" ref={visionRawInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setVisionRawDataParsed)} className="text-xs text-gray-300" />
+                            )}
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Draft Text (.txt)</label>
+                            {draftText ? (
+                                <div className="text-sm text-green-400">✓ Loaded ({draftText.split('\n').map(l=>l.trim()).filter(l=>l.length>0).length} lines)</div>
+                            ) : (
+                                <div className="text-sm text-red-400 mt-1">Please upload Draft (.txt) above ⇧</div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <button
+                          onClick={handleVisionStep2}
+                          disabled={!draftText || !visionRawDataParsed || isLoading}
+                          className="px-6 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50"
+                        >
+                          {isLoading && pipelineStep === 2 ? 'Aligning...' : 'Run Step 2'}
+                        </button>
+                        {alignedDataParsed && (
+                           <button onClick={() => saveJSON(alignedDataParsed, 'aligned_data.json')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline">
+                             Save aligned_data.json
+                           </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Step 3 */}
+                <div className={`p-4 rounded-xl border ${pipelineStep >= 3 ? 'border-green-500 bg-gray-800' : 'border-gray-700 bg-gray-900 bg-opacity-50 opacity-60'}`}>
+                    <h3 className="text-xl font-bold text-green-400 mb-2">Step 3: Continuous Processing</h3>
+                    <p className="text-sm text-gray-400 mb-4">Fixes timing gaps and formats final SRT structure. Requires aligned data and draft text.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 bg-gray-900 p-3 rounded">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Aligned Data (JSON)</label>
+                            {alignedDataParsed ? (
+                                <div className="text-sm text-green-400">✓ Loaded ({alignedDataParsed.length} records)</div>
+                            ) : (
+                                <input type="file" ref={alignedDataInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setAlignedDataParsed)} className="text-xs text-gray-300" />
+                            )}
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Draft Text (.txt)</label>
+                            {draftText ? (
+                                <div className="text-sm text-green-400">✓ Loaded</div>
+                            ) : (
+                                <div className="text-sm text-red-400 mt-1">Please upload Draft (.txt) above ⇧</div>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <button
+                          onClick={handleVisionStep3}
+                          disabled={!draftText || !alignedDataParsed || isLoading}
+                          className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white font-bold rounded shadow hover:shadow-lg transition-all disabled:opacity-50"
+                        >
+                          {isLoading && pipelineStep === 3 ? 'Processing...' : 'Run Step 3'}
+                        </button>
+                    </div>
+                </div>
+
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row justify-center gap-4">
+                <button
+                  onClick={handleTranscribe}
+                  disabled={!videoFile || isLoading}
+                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
+                >
+                  {isLoading && !draftText ? 'Transcribing...' : 'Auto Transcribe'}
+                </button>
+                <button
+                  onClick={handleAlignDraft}
+                  disabled={!videoFile || !draftText || isLoading}
+                  className="px-8 py-3 bg-gradient-to-r from-purple-500 to-purple-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex-1 max-w-xs"
+                  title={!draftText ? "Upload a draft .txt file first" : ""}
+                >
+                  {isLoading && draftText ? 'Aligning...' : 'Transcribe from Draft'}
+                </button>
+              </div>
+            )}
           </div>
 
           {isLoading && (

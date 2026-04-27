@@ -306,7 +306,7 @@ export interface TranscriptionOptions {
   timeCompensation?: number;
 }
 
-async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<TranscriptionResult> {
+export async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<TranscriptionResult> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const duration = await getVideoDuration(mediaFile);
     const chunkDurationSec = options?.chunkLength || 30;
@@ -439,7 +439,7 @@ async function transcribeVideoVisionOnly(mediaFile: File, modelName: string, api
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
 
-async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
+export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
     const chunkSize = 100; // Process 100 draft lines at a time
     let allAligned: any[] = [];
@@ -829,6 +829,80 @@ export const transcribeVideo = async (
     return "An unknown error occurred during transcription.";
   }
 };
+
+export function processContinuousSegments(draftText: string, alignedParsed: any[], duration: number | null): any[] {
+    const lines = draftText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    let lastValidTime = 0;
+    const continuousSegments: any[] = lines.map((text, idx) => {
+        const match = alignedParsed.find(p => p.lineIndex === idx + 1);
+        let start = match && typeof match.start === 'number' ? match.start : -1;
+        
+        // Ensure time doesn't jump backwards or exceed duration
+        if (start < lastValidTime) {
+            start = lastValidTime + 0.5; // Add a small increment if it jumps back or is missing
+        }
+        if (duration && start > duration) {
+            start = lastValidTime + 0.1; // Don't let it exceed video duration
+        }
+        
+        lastValidTime = start;
+        return {
+            start,
+            text
+        };
+    });
+    
+    // Merge segments with the exact same start time
+    const mergedSegments: any[] = [];
+    for (let i = 0; i < continuousSegments.length; i++) {
+        const current = continuousSegments[i];
+        if (mergedSegments.length > 0) {
+            const prev = mergedSegments[mergedSegments.length - 1];
+            if (Math.abs(current.start - prev.start) < 0.1) {
+                const prevTextClean = prev.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const currTextClean = current.text.toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                if (prevTextClean === currTextClean || prevTextClean.includes(currTextClean)) {
+                    continue;
+                } else if (currTextClean.includes(prevTextClean)) {
+                    prev.text = current.text;
+                    continue;
+                } else {
+                    prev.text += '\n' + current.text;
+                    continue;
+                }
+            }
+        }
+        mergedSegments.push({ ...current });
+    }
+
+    for (let i = 0; i < mergedSegments.length; i++) {
+        if (i < mergedSegments.length - 1) {
+            // Ensure end time is strictly greater than start time
+            let nextStart = mergedSegments[i+1].start;
+            if (nextStart <= mergedSegments[i].start) {
+                 nextStart = mergedSegments[i].start + 1;
+                 mergedSegments[i+1].start = nextStart;
+            }
+            
+            // Make subtitles continuous by extending to the next segment's start
+            let calculatedEnd = nextStart - 0.001;
+            // Cap at 15 seconds to prevent subtitles staying on screen forever during long silences
+            if (calculatedEnd - mergedSegments[i].start > 15) {
+                calculatedEnd = mergedSegments[i].start + 15;
+            }
+            mergedSegments[i].end = calculatedEnd;
+        } else {
+            mergedSegments[i].end = mergedSegments[i].start + 3;
+            if (duration && mergedSegments[i].end > duration) {
+                mergedSegments[i].end = duration;
+            }
+        }
+    }
+
+    return mergedSegments;
+}
 
 export const alignDraftWithAudio = async (
   mediaFile: File, 
