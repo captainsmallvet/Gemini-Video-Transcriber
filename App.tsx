@@ -872,16 +872,21 @@ const App: React.FC = () => {
                           {isLoading && pipelineStep === 1 ? 'Extracting...' : 'Run Step 1'}
                         </button>
                         {visionRawDataParsed && (
-                           <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline">
-                             Save vision_raw_data.json
-                           </button>
+                           <div className="flex flex-col gap-2">
+                             <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
+                               Save vision_raw_data.json
+                             </button>
+                             <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
+                               {JSON.stringify(visionRawDataParsed, null, 2)}
+                             </div>
+                           </div>
                         )}
                         {visionRawDataParsed && (
                            <button onClick={() => {
                                setSegments(visionRawDataParsed);
                                setTranscript(JSON.stringify(visionRawDataParsed, null, 2));
                                setPipelineStep(3); // Jump to transcript view
-                           }} className="text-gray-300 hover:text-white text-sm font-semibold ml-auto border border-gray-600 px-3 py-1 rounded">
+                           }} className="text-gray-300 hover:text-white text-sm font-semibold ml-auto border border-gray-600 px-3 py-1 rounded self-start mt-2 sm:mt-0">
                              Skip to SRT (Auto Transcribe)
                            </button>
                         )}
@@ -919,9 +924,14 @@ const App: React.FC = () => {
                           {isLoading && pipelineStep === 2 ? 'Aligning...' : 'Run Step 2'}
                         </button>
                         {alignedDataParsed && (
-                           <button onClick={() => saveJSON(alignedDataParsed, 'aligned_data.json')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline">
-                             Save aligned_data.json
-                           </button>
+                           <div className="flex flex-col gap-2 w-full mt-4">
+                             <button onClick={() => saveJSON(alignedDataParsed, 'aligned_data.json')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline text-left">
+                               Save aligned_data.json
+                             </button>
+                             <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
+                               {JSON.stringify(alignedDataParsed, null, 2)}
+                             </div>
+                           </div>
                         )}
                     </div>
                 </div>
