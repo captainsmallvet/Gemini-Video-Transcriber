@@ -569,14 +569,14 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
 
 export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 5; 
+    const chunkSize = 2; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
     for (let i = 0; i < missingLines.length; i += chunkSize) {
         if (i > 0) {
-            const delayMs = (options?.delayTime || 15) * 1000;
-            reportProgress(`Waiting ${options?.delayTime || 15} seconds before retrying next chunk...`);
+            const delayMs = 10000;
+            reportProgress(`Waiting 10 seconds before retrying next chunk...`);
             await new Promise(r => setTimeout(r, delayMs));
         }
 
@@ -671,14 +671,14 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
 
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 5; // Reduced from 50 to 10 to prevent AI truncation/hallucination on large outputs
+    const chunkSize = 2; // Reduced from 5 to 2 to prevent AI truncation/hallucination on large outputs
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
     for (let i = 0; i < draftLines.length; i += chunkSize) {
         if (i > 0) {
-            const delayMs = (options?.delayTime || 15) * 1000;
-            reportProgress(`Waiting ${options?.delayTime || 15} seconds before aligning next chunk...`);
+            const delayMs = 10000;
+            reportProgress(`Waiting 10 seconds before aligning next chunk...`);
             await new Promise(r => setTimeout(r, delayMs));
         }
 
