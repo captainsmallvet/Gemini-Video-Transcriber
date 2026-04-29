@@ -682,6 +682,8 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
     let debugLogs: any[] = [];
     let lastChunkStartTime = 0;
     
+    let lastMatchedTime = 0;
+    
     for (let i = 0; i < draftLines.length; i += chunkSize) {
         if (i > 0) {
             const timeSinceLastChunk = Date.now() - lastChunkStartTime;
@@ -694,6 +696,15 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         }
         lastChunkStartTime = Date.now();
 
+        // Create a temporal window to reduce JSON size and focus AI attention
+        const searchWindowStart = Math.max(0, lastMatchedTime - 5);
+        const searchWindowEnd = lastMatchedTime + 180; // 3 minutes lookahead
+        
+        let windowedSegments = rawSegments.filter(s => s.end >= searchWindowStart && s.start <= searchWindowEnd);
+        if (windowedSegments.length === 0) {
+            windowedSegments = rawSegments.filter(s => s.end >= searchWindowStart);
+        }
+
         const chunkLines = draftLines.slice(i, i + chunkSize);
         const startIndex = i + 1;
         const draftFormatted = chunkLines.map((l, idx) => `[${startIndex + idx}] ${l}`).join('\n');
@@ -703,8 +714,11 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         const promptText = `You are an expert text aligner.
         I have a RAW transcript extracted from video OCR (with exact start/end times) and a DRAFT transcript.
         
-        RAW TRANSCRIPT (JSON):
-        ${JSON.stringify(rawSegments)}
+        PREVIOUS MATCHED TIMESTAMP: ${lastMatchedTime > 0 ? parseFloat(lastMatchedTime.toFixed(3)) + " seconds" : "Start of video (0s)"}
+        (CRITICAL: The start times for the DRAFT lines below MUST be >= the previous matched timestamp!)
+
+        RAW TRANSCRIPT (JSON - Temporal Window):
+        ${JSON.stringify(windowedSegments)}
         
         DRAFT TRANSCRIPT TO ALIGN:
         ${draftFormatted}
@@ -715,7 +729,7 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
         3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
-        4. The 'start' times MUST be monotonically increasing (each line's start time must be >= the previous line's start time).
+        4. The 'start' times MUST be monotonically increasing and >= the PREVIOUS MATCHED TIMESTAMP.
         5. PROPORTIONAL INTERPOLATION: If a DRAFT line matches only the MIDDLE or END of a RAW transcript segment, you MUST mathematically calculate the 'start' time based on its character position within the raw text. 
            - Example: If RAW is "no matter how much you shake swirl or stir it" (start: 10.0, end: 20.0) and DRAFT is "or stir it", the start time should be proportionally calculated (e.g., ~17.0). DO NOT just use the raw start time 10.0.
         6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
@@ -782,6 +796,12 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
             continue;
         } else {
             allAligned.push(...parsed);
+            if (parsed.length > 0) {
+                const latestTime = parsed[parsed.length - 1].start;
+                if (typeof latestTime === 'number' && !isNaN(latestTime) && latestTime > lastMatchedTime) {
+                    lastMatchedTime = latestTime;
+                }
+            }
         }
     }
     return { aligned: allAligned, debugLogs };
