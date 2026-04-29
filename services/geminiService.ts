@@ -608,8 +608,8 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided MISSING DRAFT LINES.
         2. 'lineIndex' MUST exactly match the index provided in brackets in the draft (e.g., if draft says "[15] Hello", lineIndex must be 15).
-        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where this draft line BEGINS.
-        4. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS (pay close attention to the exact words at the beginning of the draft line).
+        4. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that closely matches the FIRST FEW WORDS of the DRAFT line. Do not match text from the previous sentence!
         5. Return ONLY valid JSON in this format: [{"lineIndex": 15, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
@@ -661,12 +661,29 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                         lastError = "AI returned an empty array";
                         parsed = null;
                     } else {
-                        // Map rawId back to start
+                        // Map rawId back to calculated start time in code
                         parsed = parsed.map((p: any) => {
-                            const matchedSegment = rawSegments[p.rawId];
+                            const matchedSegment = rawSegmentsWithId.find(s => s.rawId === p.rawId) || rawSegments[p.rawId];
+                            if (!matchedSegment) {
+                                return { lineIndex: p.lineIndex, start: 0 };
+                            }
+                            
+                            let calculatedStart = matchedSegment.start;
+                            const rawText = (matchedSegment.text || "").toLowerCase();
+                            const snippet = (p.matchedRawText || "").toLowerCase().trim();
+                            
+                            if (snippet && rawText.includes(snippet)) {
+                                const snippetIndex = rawText.indexOf(snippet);
+                                if (snippetIndex > 0) {
+                                    const proportion = snippetIndex / rawText.length;
+                                    const duration = matchedSegment.end - matchedSegment.start;
+                                    calculatedStart = matchedSegment.start + (duration * proportion);
+                                }
+                            }
+                            
                             return {
                                 lineIndex: p.lineIndex,
-                                start: matchedSegment ? matchedSegment.start : 0
+                                start: calculatedStart
                             };
                         });
                     }
@@ -751,9 +768,9 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
-        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where this draft line BEGINS.
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS (pay close attention to the exact words at the beginning of the draft line).
         4. The matched 'rawId' must correspond to a time >= the PREVIOUS MATCHED TIMESTAMP.
-        5. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
+        5. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that closely matches the FIRST FEW WORDS of the DRAFT line. Do not match text from the previous sentence!
         6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
@@ -806,12 +823,29 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                         lastError = "AI returned an empty array";
                         parsed = null; // Force retry
                     } else {
-                        // Map rawId back to start time
+                        // Map rawId back to calculated start time in code
                         parsed = parsed.map((p: any) => {
-                            const matchedSegment = rawSegments[p.rawId];
+                            const matchedSegment = windowedSegments.find(s => s.rawId === p.rawId) || rawSegments[p.rawId];
+                            if (!matchedSegment) {
+                                return { lineIndex: p.lineIndex, start: lastMatchedTime };
+                            }
+                            
+                            let calculatedStart = matchedSegment.start;
+                            const rawText = (matchedSegment.text || "").toLowerCase();
+                            const snippet = (p.matchedRawText || "").toLowerCase().trim();
+                            
+                            if (snippet && rawText.includes(snippet)) {
+                                const snippetIndex = rawText.indexOf(snippet);
+                                if (snippetIndex > 0) {
+                                    const proportion = snippetIndex / rawText.length;
+                                    const duration = matchedSegment.end - matchedSegment.start;
+                                    calculatedStart = matchedSegment.start + (duration * proportion);
+                                }
+                            }
+                            
                             return {
                                 lineIndex: p.lineIndex,
-                                start: matchedSegment ? matchedSegment.start : lastMatchedTime
+                                start: calculatedStart
                             };
                         });
                     }
