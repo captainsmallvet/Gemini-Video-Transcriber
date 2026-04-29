@@ -607,7 +607,8 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
         1. You MUST include EVERY line from the provided MISSING DRAFT LINES.
         2. 'lineIndex' MUST exactly match the index provided in brackets in the draft (e.g., if draft says "[15] Hello", lineIndex must be 15).
         3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
-        4. Return ONLY valid JSON in this format: [{"lineIndex": 15, "start": 2.155}, ...]`;
+        4. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
+        5. Return ONLY valid JSON in this format: [{"lineIndex": 15, "matchedRawText": "...", "start": 2.155}, ...]`;
         
         let parsed: any[] | null = null;
         let attempts = 0;
@@ -697,7 +698,7 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         lastChunkStartTime = Date.now();
 
         // Create a temporal window to reduce JSON size and focus AI attention
-        const searchWindowStart = Math.max(0, lastMatchedTime - 5);
+        const searchWindowStart = Math.max(0, lastMatchedTime - 60); // Widen to 60s trailing to avoid missing data if previous match was slightly off
         const searchWindowEnd = lastMatchedTime + 180; // 3 minutes lookahead
         
         let windowedSegments = rawSegments.filter(s => s.end >= searchWindowStart && s.start <= searchWindowEnd);
@@ -730,9 +731,10 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
         3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
         4. The 'start' times MUST be monotonically increasing and >= the PREVIOUS MATCHED TIMESTAMP.
-        5. PROPORTIONAL INTERPOLATION: If a DRAFT line matches only the MIDDLE or END of a RAW transcript segment, you MUST mathematically calculate the 'start' time based on its character position within the raw text. 
-           - Example: If RAW is "no matter how much you shake swirl or stir it" (start: 10.0, end: 20.0) and DRAFT is "or stir it", the start time should be proportionally calculated (e.g., ~17.0). DO NOT just use the raw start time 10.0.
-        6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "start": 2.155}, ...]`;
+        5. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
+        6. PROPORTIONAL INTERPOLATION: If a DRAFT line matches only the MIDDLE or END of a RAW transcript segment, you MUST mathematically calculate the 'start' time based on its character position within the raw text. 
+           - Example: If RAW is "this is a very long sentence" (start: 10.0, end: 20.0) and DRAFT is "a very long sentence", the start time should be proportionally calculated (e.g., ~12.5). DO NOT just use the raw start time 10.0.
+        7. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "start": 2.155}, ...]`;
         
         let parsed: any[] | null = null;
         let attempts = 0;
