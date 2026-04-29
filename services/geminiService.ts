@@ -572,13 +572,19 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
     const chunkSize = 2; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
+    let lastChunkStartTime = 0;
     
     for (let i = 0; i < missingLines.length; i += chunkSize) {
         if (i > 0) {
-            const delayMs = 10000;
-            reportProgress(`Waiting 10 seconds before retrying next chunk...`);
-            await new Promise(r => setTimeout(r, delayMs));
+            const timeSinceLastChunk = Date.now() - lastChunkStartTime;
+            const targetDelayMs = 15000;
+            const delayMs = Math.max(0, targetDelayMs - timeSinceLastChunk);
+            if (delayMs > 0) {
+                reportProgress(`Waiting ${Math.round(delayMs / 1000)} seconds before retrying next chunk...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
         }
+        lastChunkStartTime = Date.now();
 
         const chunkLines = missingLines.slice(i, i + chunkSize);
         
@@ -674,13 +680,19 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
     const chunkSize = 2; // Reduced from 5 to 2 to prevent AI truncation/hallucination on large outputs
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
+    let lastChunkStartTime = 0;
     
     for (let i = 0; i < draftLines.length; i += chunkSize) {
         if (i > 0) {
-            const delayMs = 10000;
-            reportProgress(`Waiting 10 seconds before aligning next chunk...`);
-            await new Promise(r => setTimeout(r, delayMs));
+            const timeSinceLastChunk = Date.now() - lastChunkStartTime;
+            const targetDelayMs = 15000;
+            const delayMs = Math.max(0, targetDelayMs - timeSinceLastChunk);
+            if (delayMs > 0) {
+                reportProgress(`Waiting ${Math.round(delayMs / 1000)} seconds before aligning next chunk...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
         }
+        lastChunkStartTime = Date.now();
 
         const chunkLines = draftLines.slice(i, i + chunkSize);
         const startIndex = i + 1;
