@@ -569,7 +569,7 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
 
 export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 10; 
+    const chunkSize = 5; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
@@ -671,7 +671,7 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
 
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 10; // Reduced from 50 to 10 to prevent AI truncation/hallucination on large outputs
+    const chunkSize = 5; // Reduced from 50 to 10 to prevent AI truncation/hallucination on large outputs
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     
