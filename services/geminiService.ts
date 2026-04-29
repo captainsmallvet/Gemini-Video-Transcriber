@@ -670,14 +670,29 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                             
                             let calculatedStart = matchedSegment.start;
                             const rawText = (matchedSegment.text || "").toLowerCase();
-                            const snippet = (p.matchedRawText || "").toLowerCase().trim();
                             
-                            if (snippet && rawText.includes(snippet)) {
-                                const snippetIndex = rawText.indexOf(snippet);
-                                if (snippetIndex > 0) {
-                                    const proportion = snippetIndex / rawText.length;
-                                    const duration = matchedSegment.end - matchedSegment.start;
-                                    calculatedStart = matchedSegment.start + (duration * proportion);
+                            const draftObj = chunkLines.find((l: any) => l.index === p.lineIndex);
+                            const draftStr = draftObj ? draftObj.text : "";
+                            
+                            if (draftStr) {
+                                const draftWords = draftStr.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w: string) => w.length > 0);
+                                if (draftWords.length > 0) {
+                                    let matchIdx = -1;
+                                    let matchedStr = "";
+                                    for (let len = Math.min(4, draftWords.length); len > 0; len--) {
+                                        const searchStr = draftWords.slice(0, len).join(' ');
+                                        matchIdx = rawText.indexOf(searchStr);
+                                        if (matchIdx >= 0) {
+                                            matchedStr = searchStr;
+                                            break;
+                                        }
+                                    }
+                                    if (matchIdx > 0) {
+                                        const proportion = matchIdx / Math.max(1, rawText.length);
+                                        const duration = matchedSegment.end - matchedSegment.start;
+                                        calculatedStart = matchedSegment.start + (duration * proportion);
+                                        p.matchedRawText = `[Calculated via: "${matchedStr}"]`;
+                                    }
                                 }
                             }
                             
@@ -832,14 +847,28 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                             
                             let calculatedStart = matchedSegment.start;
                             const rawText = (matchedSegment.text || "").toLowerCase();
-                            const snippet = (p.matchedRawText || "").toLowerCase().trim();
                             
-                            if (snippet && rawText.includes(snippet)) {
-                                const snippetIndex = rawText.indexOf(snippet);
-                                if (snippetIndex > 0) {
-                                    const proportion = snippetIndex / rawText.length;
-                                    const duration = matchedSegment.end - matchedSegment.start;
-                                    calculatedStart = matchedSegment.start + (duration * proportion);
+                            const draftStr = chunkLines[p.lineIndex - startIndex] || "";
+                            
+                            if (draftStr) {
+                                const draftWords = draftStr.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w: string) => w.length > 0);
+                                if (draftWords.length > 0) {
+                                    let matchIdx = -1;
+                                    let matchedStr = "";
+                                    for (let len = Math.min(4, draftWords.length); len > 0; len--) {
+                                        const searchStr = draftWords.slice(0, len).join(' ');
+                                        matchIdx = rawText.indexOf(searchStr);
+                                        if (matchIdx >= 0) {
+                                            matchedStr = searchStr;
+                                            break;
+                                        }
+                                    }
+                                    if (matchIdx > 0) {
+                                        const proportion = matchIdx / Math.max(1, rawText.length);
+                                        const duration = matchedSegment.end - matchedSegment.start;
+                                        calculatedStart = matchedSegment.start + (duration * proportion);
+                                        p.matchedRawText = `[Calculated via: "${matchedStr}"]`;
+                                    }
                                 }
                             }
                             
