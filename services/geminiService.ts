@@ -318,8 +318,20 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
     let allSegments: any[] = [];
     const retryLog: any[] = [];
     const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
+    
+    let lastChunkStartTime = 0;
 
     for (let i = 0; i < totalChunks; i++) {
+        if (i > 0) {
+            const timeSinceLastChunk = Date.now() - lastChunkStartTime;
+            const delayMs = Math.max(0, delayTimeMs - timeSinceLastChunk);
+            if (delayMs > 0) {
+                reportProgress(`Waiting ${Math.round(delayMs / 1000)} seconds before processing chunk ${i + 1}...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        lastChunkStartTime = Date.now();
+
         const startTimeSec = i * chunkDurationSec;
         const endTimeSec = Math.min(startTimeSec + chunkDurationSec + overlapSec, duration);
         
@@ -414,10 +426,6 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
         } else {
             retryLog.push({ chunk: i + 1, attempts, success: false });
         }
-        
-        if (i < totalChunks - 1) {
-            await new Promise(r => setTimeout(r, delayTimeMs));
-        }
     }
 
     // Clean and deduplicate segments based on text and start time
@@ -454,7 +462,19 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
     const retryLog: any[] = [];
     const debugLogs: { chunk: number; draftWindow: string; aiResponse: string }[] = [];
 
+    let lastChunkStartTime = 0;
+
     for (let c = 0; c < chunksToRetry.length; c++) {
+        if (c > 0) {
+            const timeSinceLastChunk = Date.now() - lastChunkStartTime;
+            const delayMs = Math.max(0, delayTimeMs - timeSinceLastChunk);
+            if (delayMs > 0) {
+                reportProgress(`Waiting ${Math.round(delayMs / 1000)} seconds before retrying next chunk...`);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        lastChunkStartTime = Date.now();
+
         const i = chunksToRetry[c];
         const startTimeSec = i * chunkDurationSec;
         const endTimeSec = Math.min(startTimeSec + chunkDurationSec + overlapSec, duration);
@@ -550,10 +570,6 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
         } else {
             retryLog.push({ chunk: i + 1, attempts, success: false });
         }
-        
-        if (c < chunksToRetry.length - 1) {
-            await new Promise(r => setTimeout(r, delayTimeMs));
-        }
     }
 
     const cleaned = cleanSegments(allSegments);
@@ -569,7 +585,7 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
 
 export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 2; 
+    const chunkSize = 5; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     let lastChunkStartTime = 0;
@@ -608,8 +624,8 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided MISSING DRAFT LINES.
         2. 'lineIndex' MUST exactly match the index provided in brackets in the draft (e.g., if draft says "[15] Hello", lineIndex must be 15).
-        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS (pay close attention to the exact words at the beginning of the draft line).
-        4. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that closely matches the FIRST FEW WORDS of the DRAFT line. Do not match text from the previous sentence!
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS. Use the exact words to find the true starting segment.
+        4. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that matches the FIRST FEW WORDS of the DRAFT line. If the DRAFT line starts with "it requires", the matchedRawText MUST start with "it requires". DO NOT match it to leftover words from the previous DRAFT line!
         5. Return ONLY valid JSON in this format: [{"lineIndex": 15, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
@@ -691,7 +707,9 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                                         const proportion = matchIdx / Math.max(1, rawText.length);
                                         const duration = matchedSegment.end - matchedSegment.start;
                                         calculatedStart = matchedSegment.start + (duration * proportion);
-                                        p.matchedRawText = `[Calculated via: "${matchedStr}"]`;
+                                        p.matchedRawText = `[Calculated via offset: "${matchedStr}"]`;
+                                    } else if (matchIdx === 0) {
+                                        p.matchedRawText = `[Exact start match: "${matchedStr}"]`;
                                     }
                                 }
                             }
@@ -727,7 +745,7 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
 
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 2; // Reduced from 5 to 2 to prevent AI truncation/hallucination on large outputs
+    const chunkSize = 5; // Reverted back to 5 to speed up alignment
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     let lastChunkStartTime = 0;
@@ -783,9 +801,9 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
-        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS (pay close attention to the exact words at the beginning of the draft line).
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS. Use the exact words to find the true starting segment.
         4. The matched 'rawId' must correspond to a time >= the PREVIOUS MATCHED TIMESTAMP.
-        5. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that closely matches the FIRST FEW WORDS of the DRAFT line. Do not match text from the previous sentence!
+        5. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that matches the FIRST FEW WORDS of the DRAFT line. If the DRAFT line starts with "it requires", the matchedRawText MUST start with "it requires". DO NOT match it to leftover words from the previous DRAFT line!
         6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
@@ -867,7 +885,9 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                                         const proportion = matchIdx / Math.max(1, rawText.length);
                                         const duration = matchedSegment.end - matchedSegment.start;
                                         calculatedStart = matchedSegment.start + (duration * proportion);
-                                        p.matchedRawText = `[Calculated via: "${matchedStr}"]`;
+                                        p.matchedRawText = `[Calculated via offset: "${matchedStr}"]`;
+                                    } else if (matchIdx === 0) {
+                                        p.matchedRawText = `[Exact start match: "${matchedStr}"]`;
                                     }
                                 }
                             }
