@@ -592,23 +592,25 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
         
         reportProgress(`Retrying alignment for missing lines (${i + 1} to ${Math.min(i + chunkSize, missingLines.length)} of ${missingLines.length})...`);
         
+        const rawSegmentsWithId = rawSegments.map((s, idx) => ({ rawId: idx, ...s }));
+
         const promptText = `You are an expert text aligner filling in gaps.
-        I have a RAW transcript extracted from video OCR (with exact start/end times) and a list of MISSING DRAFT lines that need alignment.
+        I have a RAW transcript extracted from video OCR (with exact start/end times and 'rawId') and a list of MISSING DRAFT lines that need alignment.
         
         RAW TRANSCRIPT (JSON):
-        ${JSON.stringify(rawSegments)}
+        ${JSON.stringify(rawSegmentsWithId)}
         
         MISSING DRAFT LINES TO ALIGN:
         ${draftFormatted}
         
-        Task: Match EVERY line from the MISSING DRAFT LINES to the RAW transcript to find its start time.
+        Task: Match EVERY line from the MISSING DRAFT LINES to the RAW transcript to find its starting 'rawId'.
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided MISSING DRAFT LINES.
         2. 'lineIndex' MUST exactly match the index provided in brackets in the draft (e.g., if draft says "[15] Hello", lineIndex must be 15).
-        3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where this draft line BEGINS.
         4. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
-        5. Return ONLY valid JSON in this format: [{"lineIndex": 15, "matchedRawText": "...", "start": 2.155}, ...]`;
+        5. Return ONLY valid JSON in this format: [{"lineIndex": 15, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
         let attempts = 0;
@@ -631,9 +633,10 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                                 type: Type.OBJECT,
                                 properties: {
                                     lineIndex: { type: Type.NUMBER, description: "Exact index of the line as provided in the draft" },
-                                    start: { type: Type.NUMBER, description: "Start time in seconds" }
+                                    matchedRawText: { type: Type.STRING, description: "The exact matching text from the raw transcript" },
+                                    rawId: { type: Type.INTEGER, description: "The rawId of the matching segment" }
                                 },
-                                required: ["lineIndex", "start"]
+                                required: ["lineIndex", "matchedRawText", "rawId"]
                             }
                         },
                         safetySettings: [
@@ -652,9 +655,23 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                 if (jsonMatch) jsonString = jsonMatch[0];
                 parsed = JSON.parse(jsonString);
                 
-                if (parsed && parsed.length === 0) {
-                    console.warn(`Attempt ${attempts + 1}: AI returned an empty array for missing lines. Retrying...`);
-                    lastError = "AI returned an empty array";
+                if (parsed && Array.isArray(parsed)) {
+                    if (parsed.length === 0) {
+                        console.warn(`Attempt ${attempts + 1}: AI returned an empty array for missing lines. Retrying...`);
+                        lastError = "AI returned an empty array";
+                        parsed = null;
+                    } else {
+                        // Map rawId back to start
+                        parsed = parsed.map((p: any) => {
+                            const matchedSegment = rawSegments[p.rawId];
+                            return {
+                                lineIndex: p.lineIndex,
+                                start: matchedSegment ? matchedSegment.start : 0
+                            };
+                        });
+                    }
+                } else {
+                    lastError = "AI returned invalid format";
                     parsed = null;
                 }
             } catch (e: any) {
@@ -701,9 +718,14 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         const searchWindowStart = Math.max(0, lastMatchedTime - 60); // Widen to 60s trailing to avoid missing data if previous match was slightly off
         const searchWindowEnd = lastMatchedTime + 180; // 3 minutes lookahead
         
-        let windowedSegments = rawSegments.filter(s => s.end >= searchWindowStart && s.start <= searchWindowEnd);
+        let windowedSegments = rawSegments
+            .map((s, idx) => ({ rawId: idx, ...s }))
+            .filter(s => s.end >= searchWindowStart && s.start <= searchWindowEnd);
+            
         if (windowedSegments.length === 0) {
-            windowedSegments = rawSegments.filter(s => s.end >= searchWindowStart);
+            windowedSegments = rawSegments
+                .map((s, idx) => ({ rawId: idx, ...s }))
+                .filter(s => s.end >= searchWindowStart);
         }
 
         const chunkLines = draftLines.slice(i, i + chunkSize);
@@ -713,10 +735,10 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         reportProgress(`Aligning draft lines ${startIndex} to ${startIndex + chunkLines.length - 1}...`);
         
         const promptText = `You are an expert text aligner.
-        I have a RAW transcript extracted from video OCR (with exact start/end times) and a DRAFT transcript.
+        I have a RAW transcript extracted from video OCR (with exact start/end times and 'rawId') and a DRAFT transcript.
         
         PREVIOUS MATCHED TIMESTAMP: ${lastMatchedTime > 0 ? parseFloat(lastMatchedTime.toFixed(3)) + " seconds" : "Start of video (0s)"}
-        (CRITICAL: The start times for the DRAFT lines below MUST be >= the previous matched timestamp!)
+        (CRITICAL: The DRAFT lines below MUST happen after or exactly at the previous matched timestamp!)
 
         RAW TRANSCRIPT (JSON - Temporal Window):
         ${JSON.stringify(windowedSegments)}
@@ -724,17 +746,15 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         DRAFT TRANSCRIPT TO ALIGN:
         ${draftFormatted}
         
-        Task: Match EVERY line from the DRAFT to the RAW transcript to find its start time.
+        Task: Match EVERY line from the DRAFT to the RAW transcript to find its starting 'rawId'.
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
         2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
-        3. 'start' MUST be the start time in RAW SECONDS (e.g., 62.531).
-        4. The 'start' times MUST be monotonically increasing and >= the PREVIOUS MATCHED TIMESTAMP.
+        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where this draft line BEGINS.
+        4. The matched 'rawId' must correspond to a time >= the PREVIOUS MATCHED TIMESTAMP.
         5. 'matchedRawText' MUST contain the exact text snippet from the RAW TRANSCRIPT that corresponds to the BEGINNING of the DRAFT line. Use this to ground your reasoning.
-        6. PROPORTIONAL INTERPOLATION: If a DRAFT line matches only the MIDDLE or END of a RAW transcript segment, you MUST mathematically calculate the 'start' time based on its character position within the raw text. 
-           - Example: If RAW is "this is a very long sentence" (start: 10.0, end: 20.0) and DRAFT is "a very long sentence", the start time should be proportionally calculated (e.g., ~12.5). DO NOT just use the raw start time 10.0.
-        7. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "start": 2.155}, ...]`;
+        6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
         let attempts = 0;
@@ -758,9 +778,10 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                                 type: Type.OBJECT,
                                 properties: {
                                     lineIndex: { type: Type.NUMBER, description: "Index of the line from the draft" },
-                                    start: { type: Type.NUMBER, description: "Start time in seconds" }
+                                    matchedRawText: { type: Type.STRING, description: "The exact matching text from the raw transcript" },
+                                    rawId: { type: Type.INTEGER, description: "The rawId of the matching segment" }
                                 },
-                                required: ["lineIndex", "start"]
+                                required: ["lineIndex", "matchedRawText", "rawId"]
                             }
                         },
                         safetySettings: [
@@ -779,10 +800,24 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                 if (jsonMatch) jsonString = jsonMatch[0];
                 parsed = JSON.parse(jsonString);
                 
-                if (parsed && parsed.length === 0) {
-                    console.warn(`Attempt ${attempts + 1}: AI returned an empty array for alignment. Retrying...`);
-                    lastError = "AI returned an empty array";
-                    parsed = null; // Force retry
+                if (parsed && Array.isArray(parsed)) {
+                    if (parsed.length === 0) {
+                        console.warn(`Attempt ${attempts + 1}: AI returned an empty array for alignment. Retrying...`);
+                        lastError = "AI returned an empty array";
+                        parsed = null; // Force retry
+                    } else {
+                        // Map rawId back to start time
+                        parsed = parsed.map((p: any) => {
+                            const matchedSegment = rawSegments[p.rawId];
+                            return {
+                                lineIndex: p.lineIndex,
+                                start: matchedSegment ? matchedSegment.start : lastMatchedTime
+                            };
+                        });
+                    }
+                } else {
+                    lastError = "AI returned invalid format";
+                    parsed = null;
                 }
             } catch (e: any) {
                 console.error("Alignment failed on attempt", attempts + 1, e);
