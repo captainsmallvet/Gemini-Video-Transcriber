@@ -364,10 +364,11 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
         3. 'end': The EXACT timestamp (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
         4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
         5. DO NOT hallucinate, guess, or auto-complete text. ONLY transcribe text that is clearly visible in the provided frames. If a sentence is cut off at the end of the frames, transcribe ONLY the visible portion.
-        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles, even if they look similar to previous ones but contain different words.
+        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles! Sometimes a new subtitle appears briefly or immediately after the previous one. DO NOT merge distinct subtitles into one block. Each distinct sentence or phrase shown MUST have its own JSON object.
         7. NEVER assign the exact same 'start' and 'end' time to multiple distinct subtitles. Each distinct subtitle must have its own unique time range corresponding to when it is actually visible.
         8. If you reach the last frame provided, STOP. DO NOT transcribe text that you expect to come next but is not visible in the current frames.
-        9. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
+        9. Be extremely meticulous. Make sure to cover EVERY text change visible in the video frames.
+        10. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
         
         parts.push({ text: promptText });
 
@@ -508,10 +509,11 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
         3. 'end': The EXACT timestamp (in RAW SECONDS) when this subtitle DISAPPEARS or changes.
         4. The 'start' and 'end' times MUST be between ${startTimeSec} and ${endTimeSec}.
         5. DO NOT hallucinate, guess, or auto-complete text. ONLY transcribe text that is clearly visible in the provided frames. If a sentence is cut off at the end of the frames, transcribe ONLY the visible portion.
-        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles, even if they look similar to previous ones but contain different words.
+        6. PROCESS EVERY FRAME CAREFULLY. Do not skip subtitles! Sometimes a new subtitle appears briefly or immediately after the previous one. DO NOT merge distinct subtitles into one block. Each distinct sentence or phrase shown MUST have its own JSON object.
         7. NEVER assign the exact same 'start' and 'end' time to multiple distinct subtitles. Each distinct subtitle must have its own unique time range corresponding to when it is actually visible.
         8. If you reach the last frame provided, STOP. DO NOT transcribe text that you expect to come next but is not visible in the current frames.
-        9. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
+        9. Be extremely meticulous. Make sure to cover EVERY text change visible in the video frames.
+        10. Return ONLY valid JSON in this format: [{"text": "step by step path to ending suffering", "start": ${startTimeSec + 1.0}, "end": ${startTimeSec + 3.5}}]`;
         
         parts.push({ text: promptText });
 
