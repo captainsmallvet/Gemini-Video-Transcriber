@@ -44,7 +44,7 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 allData.push({ fileIndex: i, entries: parsed });
             }
 
-            interface TaggedEntry extends Entry { fileIndex: number }
+            interface TaggedEntry extends Entry { fileIndex: number, isFakeTime: boolean }
             const splitEntries: TaggedEntry[] = [];
             allData.forEach(d => {
                 d.entries.forEach(e => {
@@ -59,11 +59,12 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                                 text: line,
                                 start: Number((e.start + (partDur * idx)).toFixed(2)),
                                 end: Number((e.start + (partDur * (idx + 1))).toFixed(2)),
-                                fileIndex: d.fileIndex
+                                fileIndex: d.fileIndex,
+                                isFakeTime: true
                             });
                         });
                     } else {
-                        splitEntries.push({ ...e, text, fileIndex: d.fileIndex });
+                        splitEntries.push({ ...e, text, fileIndex: d.fileIndex, isFakeTime: false });
                     }
                 });
             });
@@ -73,11 +74,14 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
 
             const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '');
             const calculateSimilarity = (s1: string, s2: string) => {
-                const w1 = new Set(normalize(s1).split(/\s+/).filter(Boolean));
-                const w2 = new Set(normalize(s2).split(/\s+/).filter(Boolean));
+                const t1 = normalize(s1);
+                const t2 = normalize(s2);
+                if (t1.includes(t2) || t2.includes(t1)) return 1.0;
+                const w1 = new Set(t1.split(/\s+/).filter(Boolean));
+                const w2 = new Set(t2.split(/\s+/).filter(Boolean));
+                if (w1.size === 0 || w2.size === 0) return 0;
                 const intersection = [...w1].filter(x => w2.has(x)).length;
-                const union = new Set([...w1, ...w2]).size;
-                return intersection / Math.max(1, union);
+                return intersection / Math.min(w1.size, w2.size);
             };
 
             const clusters: TaggedEntry[][] = [];
@@ -86,18 +90,26 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 let foundCluster = false;
                 
                 // Try to find a matching cluster starting from the most recent ones
-                // This handles interleaved subtitles that overlap in time
-                for (let i = clusters.length - 1; i >= Math.max(0, clusters.length - 15); i--) {
+                for (let i = clusters.length - 1; i >= Math.max(0, clusters.length - 20); i--) {
                     const cluster = clusters[i];
-                    // Compare with the average or the last element of the cluster
-                    const rep = cluster[cluster.length - 1]; 
                     
-                    const timeOverlap = (entry.start <= rep.end + 2.0) && (entry.end >= rep.start - 2.0);
-                    const timeClose = Math.abs(entry.start - rep.start) <= 3.0;
+                    let matches = false;
+                    for (const rep of cluster) {
+                        const overlapStart = Math.max(entry.start, rep.start);
+                        const overlapEnd = Math.min(entry.end, rep.end);
+                        const overlapDur = overlapEnd - overlapStart;
+                        const timeOverlap = overlapDur > 0 && (overlapDur / Math.min(entry.end - entry.start, rep.end - rep.start) > 0.1);
+                        const timeClose = Math.abs(entry.start - rep.start) <= 2.0;
+                        
+                        const sim = calculateSimilarity(entry.text, rep.text);
+                        
+                        if ((sim > 0.6 && timeClose) || (sim > 0.4 && timeOverlap)) {
+                            matches = true;
+                            break;
+                        }
+                    }
                     
-                    const sim = calculateSimilarity(entry.text, rep.text);
-                    
-                    if ((sim > 0.6 && timeClose) || (sim > 0.4 && timeOverlap)) {
+                    if (matches) {
                         cluster.push(entry);
                         foundCluster = true;
                         break;
@@ -115,19 +127,16 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 const maxLenIdx = textLengths.indexOf(Math.max(...textLengths));
                 const bestText = cluster[maxLenIdx].text;
 
-                const starts = cluster.map(c => c.start);
-                const ends = cluster.map(c => c.end);
-                
-                // Average start and end
-                const avgStart = starts.reduce((a, b) => a + b, 0) / starts.length;
-                const avgEnd = ends.reduce((a, b) => a + b, 0) / ends.length;
+                const realEntries = cluster.filter(c => !c.isFakeTime);
+                const startSource = realEntries.length > 0 ? realEntries : cluster;
+                const endSource = realEntries.length > 0 ? realEntries : cluster;
 
-                const sources = [...new Set(cluster.map(c => c.fileIndex))];
+                const avgStart = startSource.reduce((a, b) => a + b.start, 0) / startSource.length;
+                const avgEnd = endSource.reduce((a, b) => a + b.end, 0) / endSource.length;
                 
-                const maxStartDiff = Math.max(...starts) - Math.min(...starts);
-                const maxEndDiff = Math.max(...ends) - Math.min(...ends);
-                const isTimingAdjusted = cluster.length > 1 && (maxStartDiff > 0.5 || maxEndDiff > 0.5);
-                const isAdded = sources.length < files.length; // didn't come from all files
+                const sources = [...new Set(cluster.map(c => c.fileIndex))];
+                const isTimingAdjusted = cluster.length > 1 && (!realEntries.length || realEntries.length < cluster.length);
+                const isAdded = sources.length < files.length;
 
                 return {
                     id: Math.random().toString(36).substr(2, 9),
@@ -142,6 +151,18 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
 
             // sort merged by start time
             merged.sort((a, b) => a.start - b.start);
+
+            // Sequential non-overlap enforcing
+            for (let i = 1; i < merged.length; i++) {
+                if (merged[i].start < merged[i-1].end) {
+                    // if overlap is minimal, snap it
+                    if (merged[i-1].end - merged[i].start < 2.5) {
+                        merged[i-1].end = merged[i].start;
+                        merged[i-1].isTimingAdjusted = true;
+                    }
+                }
+            }
+
             setMergedData(merged);
 
         } catch (err) {
