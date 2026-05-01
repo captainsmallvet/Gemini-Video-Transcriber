@@ -149,20 +149,43 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 };
             });
 
-            // sort merged by start time
-            merged.sort((a, b) => a.start - b.start);
+            // sort merged by start time, then end time
+            merged.sort((a, b) => {
+                if (Math.abs(a.start - b.start) > 0.01) return a.start - b.start;
+                return a.end - b.end;
+            });
 
-            // Sequential non-overlap enforcing
+            // Sequential non-overlap enforcing and sequential logic
             for (let i = 1; i < merged.length; i++) {
-                if (merged[i].start < merged[i-1].end) {
-                    // if overlap is minimal, snap it
-                    if (merged[i-1].end - merged[i].start < 2.5) {
-                        merged[i-1].end = merged[i].start;
-                        merged[i-1].isTimingAdjusted = true;
+                const prev = merged[i-1];
+                const curr = merged[i];
+
+                // If they start at the same time or overlap significantly
+                if (curr.start < prev.end) {
+                    const overlap = prev.end - curr.start;
+                    
+                    // Case 1: Identical start times -> likely sequential sub-phrases
+                    if (Math.abs(curr.start - prev.start) < 0.1) {
+                         curr.start = prev.end;
+                         curr.isTimingAdjusted = true;
+                    } 
+                    // Case 2: Significant overlap
+                    else if (overlap > 0.1) {
+                        // If it's a small overlap, just snap them
+                        if (overlap < 2.0) {
+                            prev.end = curr.start;
+                            prev.isTimingAdjusted = true;
+                        } else {
+                            // Larger overlap: move current start to previous end
+                            curr.start = prev.end;
+                            curr.isTimingAdjusted = true;
+                        }
                     }
                 }
             }
 
+            // Final sort after adjustments
+            merged.sort((a, b) => a.start - b.start);
             setMergedData(merged);
 
         } catch (err) {
