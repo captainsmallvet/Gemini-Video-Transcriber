@@ -3,6 +3,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignTextWithRawVision, alignMissingLines, processContinuousSegments, retryVisionChunks, cleanSegments } from './services/geminiService';
 import Spinner from './components/Spinner';
 
+import { MergeRawDataTool } from './components/MergeRawDataTool';
 const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [draftFile, setDraftFile] = useState<File | null>(null);
@@ -1093,6 +1094,11 @@ const App: React.FC = () => {
                        </div>
                     )}
                 </div>
+
+                <MergeRawDataTool onApplyToStep2={(data) => {
+                    setVisionRawDataParsed(data);
+                    setPipelineStep(2);
+                }} />
 
                  {/* Step 2 */}
                 <div className={`p-4 rounded-xl border ${pipelineStep >= 2 ? 'border-purple-500 bg-gray-800' : 'border-gray-700 bg-gray-900 bg-opacity-50 opacity-60'}`}>
