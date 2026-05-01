@@ -71,40 +71,65 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
             // Sort by start time
             splitEntries.sort((a, b) => a.start - b.start);
 
+            const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '');
             const calculateSimilarity = (s1: string, s2: string) => {
-                const w1 = new Set(s1.toLowerCase().split(/\s+/));
-                const w2 = new Set(s2.toLowerCase().split(/\s+/));
+                const w1 = new Set(normalize(s1).split(/\s+/).filter(Boolean));
+                const w2 = new Set(normalize(s2).split(/\s+/).filter(Boolean));
                 const intersection = [...w1].filter(x => w2.has(x)).length;
                 const union = new Set([...w1, ...w2]).size;
                 return intersection / Math.max(1, union);
             };
 
-            const merged: MergedEntry[] = [];
-            let currentCluster: TaggedEntry[] = [];
+            const clusters: TaggedEntry[][] = [];
 
-            const flushCluster = () => {
-                if (currentCluster.length === 0) return;
+            for (const entry of splitEntries) {
+                let foundCluster = false;
                 
-                // Pick text: longest text
-                const textLengths = currentCluster.map(c => c.text.length);
-                const maxLenIdx = textLengths.indexOf(Math.max(...textLengths));
-                const bestText = currentCluster[maxLenIdx].text;
+                // Try to find a matching cluster starting from the most recent ones
+                // This handles interleaved subtitles that overlap in time
+                for (let i = clusters.length - 1; i >= Math.max(0, clusters.length - 15); i--) {
+                    const cluster = clusters[i];
+                    // Compare with the average or the last element of the cluster
+                    const rep = cluster[cluster.length - 1]; 
+                    
+                    const timeOverlap = (entry.start <= rep.end + 2.0) && (entry.end >= rep.start - 2.0);
+                    const timeClose = Math.abs(entry.start - rep.start) <= 3.0;
+                    
+                    const sim = calculateSimilarity(entry.text, rep.text);
+                    
+                    if ((sim > 0.6 && timeClose) || (sim > 0.4 && timeOverlap)) {
+                        cluster.push(entry);
+                        foundCluster = true;
+                        break;
+                    }
+                }
+                
+                if (!foundCluster) {
+                    clusters.push([entry]);
+                }
+            }
 
-                const starts = currentCluster.map(c => c.start);
-                const ends = currentCluster.map(c => c.end);
+            const merged: MergedEntry[] = clusters.map(cluster => {
+                // Pick text: longest text
+                const textLengths = cluster.map(c => c.text.length);
+                const maxLenIdx = textLengths.indexOf(Math.max(...textLengths));
+                const bestText = cluster[maxLenIdx].text;
+
+                const starts = cluster.map(c => c.start);
+                const ends = cluster.map(c => c.end);
                 
                 // Average start and end
                 const avgStart = starts.reduce((a, b) => a + b, 0) / starts.length;
                 const avgEnd = ends.reduce((a, b) => a + b, 0) / ends.length;
 
-                const sources = [...new Set(currentCluster.map(c => c.fileIndex))];
+                const sources = [...new Set(cluster.map(c => c.fileIndex))];
                 
                 const maxStartDiff = Math.max(...starts) - Math.min(...starts);
                 const maxEndDiff = Math.max(...ends) - Math.min(...ends);
-                const isTimingAdjusted = currentCluster.length > 1 && (maxStartDiff > 0.5 || maxEndDiff > 0.5);
+                const isTimingAdjusted = cluster.length > 1 && (maxStartDiff > 0.5 || maxEndDiff > 0.5);
                 const isAdded = sources.length < files.length; // didn't come from all files
 
-                merged.push({
+                return {
                     id: Math.random().toString(36).substr(2, 9),
                     text: bestText,
                     start: Number(avgStart.toFixed(2)),
@@ -112,33 +137,10 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                     sources,
                     isTimingAdjusted,
                     isAdded
-                });
+                };
+            });
 
-                currentCluster = [];
-            };
-
-            for (const entry of splitEntries) {
-                if (currentCluster.length === 0) {
-                    currentCluster.push(entry);
-                } else {
-                    const latestInCluster = currentCluster[currentCluster.length - 1];
-                    const timeOverlap = (entry.start <= latestInCluster.end + 0.5) && (entry.end >= latestInCluster.start - 0.5);
-                    const timeClose = Math.abs(entry.start - latestInCluster.start) <= 2.0;
-                    
-                    const sim = calculateSimilarity(entry.text, latestInCluster.text);
-                    
-                    // Stricter clustering bounds: only merge if they are very similar or somewhat similar and overlap
-                    if ((sim > 0.6 && timeClose) || (sim > 0.3 && timeOverlap)) {
-                        currentCluster.push(entry);
-                    } else {
-                        flushCluster();
-                        currentCluster.push(entry);
-                    }
-                }
-            }
-            flushCluster();
-
-            // Additional sorting to ensure chronologic order just in case
+            // sort merged by start time
             merged.sort((a, b) => a.start - b.start);
             setMergedData(merged);
 
