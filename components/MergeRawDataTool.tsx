@@ -76,12 +76,14 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
             const calculateSimilarity = (s1: string, s2: string) => {
                 const t1 = normalize(s1);
                 const t2 = normalize(s2);
-                if (t1.includes(t2) || t2.includes(t1)) return 1.0;
+                if (t1 === t2) return 1.0;
                 const w1 = new Set(t1.split(/\s+/).filter(Boolean));
                 const w2 = new Set(t2.split(/\s+/).filter(Boolean));
+                if (w1.size === 0 && w2.size === 0) return 1.0;
                 if (w1.size === 0 || w2.size === 0) return 0;
                 const intersection = [...w1].filter(x => w2.has(x)).length;
-                return intersection / Math.min(w1.size, w2.size);
+                const union = new Set([...w1, ...w2]).size;
+                return intersection / union;
             };
 
             const clusters: TaggedEntry[][] = [];
@@ -160,25 +162,34 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 const prev = merged[i-1];
                 const curr = merged[i];
 
-                // If they start at the same time or overlap significantly
                 if (curr.start < prev.end) {
-                    const overlap = prev.end - curr.start;
-                    
-                    // Case 1: Identical start times -> likely sequential sub-phrases
-                    if (Math.abs(curr.start - prev.start) < 0.1) {
-                         curr.start = prev.end;
-                         curr.isTimingAdjusted = true;
-                    } 
-                    // Case 2: Significant overlap
-                    else if (overlap > 0.1) {
-                        // If it's a small overlap, just snap them
-                        if (overlap < 2.0) {
+                    if (prev.start >= curr.start) {
+                        // Should be rare due to sorting, but just in case
+                        curr.start = prev.end;
+                        curr.isTimingAdjusted = true;
+                    } else if (prev.end >= curr.end) {
+                        // prev completely swallows curr (bloated prev)
+                        prev.end = curr.start;
+                        prev.isTimingAdjusted = true;
+                    } else {
+                        // standard overlap
+                        const overlapAmount = prev.end - curr.start;
+                        if (overlapAmount > 1.5) {
+                            // If overlap is huge, trust the start of the next one over the end of the previous one
                             prev.end = curr.start;
                             prev.isTimingAdjusted = true;
                         } else {
-                            // Larger overlap: move current start to previous end
-                            curr.start = prev.end;
-                            curr.isTimingAdjusted = true;
+                            // Small overlap, split the difference
+                            const mid = Number(((prev.end + curr.start) / 2).toFixed(2));
+                            if (mid > prev.start && mid < curr.end) {
+                                prev.end = mid;
+                                curr.start = mid;
+                                prev.isTimingAdjusted = true;
+                                curr.isTimingAdjusted = true;
+                            } else {
+                                prev.end = curr.start;
+                                prev.isTimingAdjusted = true;
+                            }
                         }
                     }
                 }
