@@ -44,15 +44,32 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 allData.push({ fileIndex: i, entries: parsed });
             }
 
-            // Flatten all entries
             interface TaggedEntry extends Entry { fileIndex: number }
-            const flattened: TaggedEntry[] = [];
+            const splitEntries: TaggedEntry[] = [];
             allData.forEach(d => {
-                d.entries.forEach(e => flattened.push({ ...e, fileIndex: d.fileIndex }));
+                d.entries.forEach(e => {
+                    const text = e.text.trim();
+                    // Split chunks that contain \n into individual chunks with proportionally divided time
+                    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+                    if (lines.length > 1) {
+                        const duration = Math.max(0, e.end - e.start);
+                        const partDur = duration / lines.length;
+                        lines.forEach((line, idx) => {
+                            splitEntries.push({
+                                text: line,
+                                start: Number((e.start + (partDur * idx)).toFixed(2)),
+                                end: Number((e.start + (partDur * (idx + 1))).toFixed(2)),
+                                fileIndex: d.fileIndex
+                            });
+                        });
+                    } else {
+                        splitEntries.push({ ...e, text, fileIndex: d.fileIndex });
+                    }
+                });
             });
 
             // Sort by start time
-            flattened.sort((a, b) => a.start - b.start);
+            splitEntries.sort((a, b) => a.start - b.start);
 
             const calculateSimilarity = (s1: string, s2: string) => {
                 const w1 = new Set(s1.toLowerCase().split(/\s+/));
@@ -68,7 +85,7 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
             const flushCluster = () => {
                 if (currentCluster.length === 0) return;
                 
-                // Pick text: longest text or most common
+                // Pick text: longest text
                 const textLengths = currentCluster.map(c => c.text.length);
                 const maxLenIdx = textLengths.indexOf(Math.max(...textLengths));
                 const bestText = currentCluster[maxLenIdx].text;
@@ -100,15 +117,18 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 currentCluster = [];
             };
 
-            for (const entry of flattened) {
+            for (const entry of splitEntries) {
                 if (currentCluster.length === 0) {
                     currentCluster.push(entry);
                 } else {
                     const latestInCluster = currentCluster[currentCluster.length - 1];
-                    const timeOverlap = (entry.start - latestInCluster.end) < 2.0; // close in time
+                    const timeOverlap = (entry.start <= latestInCluster.end + 0.5) && (entry.end >= latestInCluster.start - 0.5);
+                    const timeClose = Math.abs(entry.start - latestInCluster.start) <= 2.0;
+                    
                     const sim = calculateSimilarity(entry.text, latestInCluster.text);
                     
-                    if (sim > 0.4 || (timeOverlap && sim > 0.1) || Math.abs(entry.start - latestInCluster.start) < 2.0) {
+                    // Stricter clustering bounds: only merge if they are very similar or somewhat similar and overlap
+                    if ((sim > 0.6 && timeClose) || (sim > 0.3 && timeOverlap)) {
                         currentCluster.push(entry);
                     } else {
                         flushCluster();
