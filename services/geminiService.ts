@@ -709,20 +709,37 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                                 if (draftWords.length > 0) {
                                     let matchIdx = -1;
                                     let matchedStr = "";
-                                    for (let len = Math.min(4, draftWords.length); len > 0; len--) {
+                                    let bestSegment = matchedSegment;
+                                    const candidateOffsets = [0, 1, -1, 2, -2, 3, -3];
+                                    
+                                    for (const len of [Math.min(6, draftWords.length), Math.min(5, draftWords.length), Math.min(4, draftWords.length), Math.min(3, draftWords.length), 2]) {
+                                        if (matchIdx !== -1) break;
                                         const searchStr = draftWords.slice(0, len).join(' ');
-                                        matchIdx = rawText.indexOf(searchStr);
-                                        if (matchIdx >= 0) {
-                                            matchedStr = searchStr;
-                                            break;
+                                        
+                                        for (const offset of candidateOffsets) {
+                                            const candIdx = p.rawId + offset;
+                                            const candSeg = rawSegmentsWithId.find(s => s.rawId === candIdx) || rawSegments[candIdx];
+                                            if (candSeg) {
+                                                const candText = (candSeg.text || "").toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+                                                const idx = candText.indexOf(searchStr);
+                                                if (idx !== -1) {
+                                                    matchIdx = idx;
+                                                    bestSegment = candSeg;
+                                                    matchedStr = searchStr;
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
+                                    
                                     if (matchIdx > 0) {
-                                        const proportion = matchIdx / Math.max(1, rawText.length);
-                                        const duration = matchedSegment.end - matchedSegment.start;
-                                        calculatedStart = matchedSegment.start + (duration * proportion);
+                                        const candText = (bestSegment.text || "").toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+                                        const proportion = matchIdx / Math.max(1, candText.length);
+                                        const duration = (bestSegment.end || bestSegment.start + 3) - bestSegment.start;
+                                        calculatedStart = bestSegment.start + (duration * proportion);
                                         p.matchedRawText = `[Calculated via offset: "${matchedStr}"]`;
                                     } else if (matchIdx === 0) {
+                                        calculatedStart = bestSegment.start;
                                         p.matchedRawText = `[Exact start match: "${matchedStr}"]`;
                                     }
                                 }
@@ -888,20 +905,37 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                                 if (draftWords.length > 0) {
                                     let matchIdx = -1;
                                     let matchedStr = "";
-                                    for (let len = Math.min(4, draftWords.length); len > 0; len--) {
+                                    let bestSegment = matchedSegment;
+                                    const candidateOffsets = [0, 1, -1, 2, -2, 3, -3];
+                                    
+                                    for (const len of [Math.min(6, draftWords.length), Math.min(5, draftWords.length), Math.min(4, draftWords.length), Math.min(3, draftWords.length), 2]) {
+                                        if (matchIdx !== -1) break;
                                         const searchStr = draftWords.slice(0, len).join(' ');
-                                        matchIdx = rawText.indexOf(searchStr);
-                                        if (matchIdx >= 0) {
-                                            matchedStr = searchStr;
-                                            break;
+                                        
+                                        for (const offset of candidateOffsets) {
+                                            const candIdx = p.rawId + offset;
+                                            const candSeg = windowedSegments.find(s => s.rawId === candIdx) || rawSegments[candIdx];
+                                            if (candSeg) {
+                                                const candText = (candSeg.text || "").toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+                                                const idx = candText.indexOf(searchStr);
+                                                if (idx !== -1) {
+                                                    matchIdx = idx;
+                                                    bestSegment = candSeg;
+                                                    matchedStr = searchStr;
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
+                                    
                                     if (matchIdx > 0) {
-                                        const proportion = matchIdx / Math.max(1, rawText.length);
-                                        const duration = matchedSegment.end - matchedSegment.start;
-                                        calculatedStart = matchedSegment.start + (duration * proportion);
+                                        const candText = (bestSegment.text || "").toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+                                        const proportion = matchIdx / Math.max(1, candText.length);
+                                        const duration = (bestSegment.end || bestSegment.start + 3) - bestSegment.start;
+                                        calculatedStart = bestSegment.start + (duration * proportion);
                                         p.matchedRawText = `[Calculated via offset: "${matchedStr}"]`;
                                     } else if (matchIdx === 0) {
+                                        calculatedStart = bestSegment.start;
                                         p.matchedRawText = `[Exact start match: "${matchedStr}"]`;
                                     }
                                 }
