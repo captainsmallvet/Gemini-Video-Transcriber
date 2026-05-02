@@ -201,6 +201,9 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
 
             // Final sort after adjustments
             merged.sort((a, b) => a.start - b.start);
+            if (merged.length > 0) {
+                merged[0].start = 0;
+            }
             setMergedData(merged);
 
         } catch (err) {
@@ -227,6 +230,31 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = 'merged_vision_raw_data.json';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const formatSRTTimestamp = (seconds: number): string => {
+        const pad = (num: number, size: number) => String(num).padStart(size, '0');
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds % 1) * 1000);
+        return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
+    };
+
+    const downloadSrt = () => {
+        let srtContent = '';
+        mergedData.forEach((seg, index) => {
+            srtContent += `${index + 1}\n`;
+            srtContent += `${formatSRTTimestamp(seg.start)} --> ${formatSRTTimestamp(seg.end)}\n`;
+            srtContent += `${seg.text}\n\n`;
+        });
+        const blob = new Blob([srtContent], { type: 'application/octet-stream' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'merged_vision_raw_data.srt';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -344,6 +372,12 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                             className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-bold rounded shadow transition-all"
                         >
                             Save Merged JSON
+                        </button>
+                        <button
+                            onClick={downloadSrt}
+                            className="px-6 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-bold rounded shadow transition-all"
+                        >
+                            Save Merged SRT
                         </button>
                     </div>
                 </div>

@@ -102,6 +102,16 @@ export const applyTimeCompensation = (segments: any[], compensation: number) => 
     });
 };
 
+export const enforceStartAndEnd = (segments: any[], duration: number | null) => {
+    if (segments.length > 0) {
+        segments[0].start = 0;
+        if (duration && duration > 0) {
+            segments[segments.length - 1].end = duration;
+        }
+    }
+    return segments;
+};
+
 export const cleanSegments = (segments: any[]) => {
     // Sort by start time to ensure chronological order
     segments.sort((a, b) => a.start - b.start);
@@ -445,7 +455,8 @@ export async function transcribeVideoVisionOnly(mediaFile: File, modelName: stri
         }
     }
 
-    const finalSegments = applyTimeCompensation(deduplicated, options?.timeCompensation || 0);
+    let finalSegments = applyTimeCompensation(deduplicated, options?.timeCompensation || 0);
+    finalSegments = enforceStartAndEnd(finalSegments, duration);
 
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 }
@@ -1133,7 +1144,8 @@ export const transcribeVideo = async (
 
         reportProgress("Finalizing transcription...");
         const cleanedSegments = cleanSegments(allSegments);
-        const finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+        let finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+        finalSegments = enforceStartAndEnd(finalSegments, duration);
         return { data: JSON.stringify(finalSegments), retryLog };
     }
 
@@ -1211,7 +1223,8 @@ export const transcribeVideo = async (
                 text: seg.text
             }));
             const cleanedSegments = cleanSegments(normalizedParsed);
-            const finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+            let finalSegments = applyTimeCompensation(cleanedSegments, options?.timeCompensation || 0);
+            finalSegments = enforceStartAndEnd(finalSegments, duration);
             return { data: JSON.stringify(finalSegments), retryLog: [] };
         }
     } catch (e) {
@@ -1300,11 +1313,12 @@ export function processContinuousSegments(draftText: string, alignedParsed: any[
             }
             mergedSegments[i].end = calculatedEnd;
         } else {
-            mergedSegments[i].end = mergedSegments[i].start + 3;
-            if (duration && mergedSegments[i].end > duration) {
-                mergedSegments[i].end = duration;
-            }
+            mergedSegments[i].end = duration && duration > 0 ? duration : mergedSegments[i].start + 3;
         }
+    }
+
+    if (mergedSegments.length > 0) {
+        mergedSegments[0].start = 0;
     }
 
     return mergedSegments;
@@ -1824,14 +1838,12 @@ export const alignDraftWithAudio = async (
             }
             mergedSegments[i].end = calculatedEnd;
         } else {
-            mergedSegments[i].end = mergedSegments[i].start + 3;
-            if (duration && mergedSegments[i].end > duration) {
-                mergedSegments[i].end = duration;
-            }
+            mergedSegments[i].end = duration && duration > 0 ? duration : mergedSegments[i].start + 3;
         }
     }
 
-    const finalSegments = applyTimeCompensation(mergedSegments, options?.timeCompensation || 0);
+    let finalSegments = applyTimeCompensation(mergedSegments, options?.timeCompensation || 0);
+    finalSegments = enforceStartAndEnd(finalSegments, duration);
 
     return { data: JSON.stringify(finalSegments), retryLog, debugLogs };
 

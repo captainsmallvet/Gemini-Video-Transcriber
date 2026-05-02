@@ -643,6 +643,26 @@ const App: React.FC = () => {
       URL.revokeObjectURL(link.href);
   };
 
+  const saveSRT = (data: any[] | null, filename: string) => {
+      if (!data || data.length === 0) return;
+      
+      let srtContent = '';
+      data.forEach((seg, index) => {
+          srtContent += `${index + 1}\n`;
+          srtContent += `${formatSRTTimestamp(seg.start)} --> ${formatSRTTimestamp(seg.end)}\n`;
+          srtContent += `${seg.text}\n\n`;
+      });
+
+      const blob = new Blob([srtContent], { type: 'application/octet-stream' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+  };
+
   const removeFile = () => {
     setVideoFile(null);
     setTranscript(null);
@@ -1083,9 +1103,14 @@ const App: React.FC = () => {
                     {visionRawDataParsed && (
                        <div className="flex flex-col gap-2 w-full mt-4">
                          <div className="flex justify-between items-center">
-                           <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
-                             Save vision_raw_data.json
-                           </button>
+                           <div className="flex space-x-4">
+                             <button onClick={() => saveJSON(visionRawDataParsed, 'vision_raw_data.json')} className="text-blue-400 hover:text-blue-300 text-sm font-semibold underline text-left">
+                               Save vision_raw_data.json
+                             </button>
+                             <button onClick={() => saveSRT(visionRawDataParsed, 'vision_raw_data.srt')} className="text-purple-400 hover:text-purple-300 text-sm font-semibold underline text-left">
+                               Save vision_raw_data.srt
+                             </button>
+                           </div>
                            <span className="text-xs text-gray-500 italic flex-1 ml-4 text-right">Note: Contains Raw text from OCR limits. Gaps are normal.</span>
                          </div>
                          <div className="max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 font-mono">
