@@ -95,6 +95,10 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 for (let i = clusters.length - 1; i >= Math.max(0, clusters.length - 20); i--) {
                     const cluster = clusters[i];
                     
+                    if (cluster.some(c => c.fileIndex === entry.fileIndex)) {
+                        continue;
+                    }
+
                     let matches = false;
                     for (const rep of cluster) {
                         const overlapStart = Math.max(entry.start, rep.start);
