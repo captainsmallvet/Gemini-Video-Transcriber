@@ -598,7 +598,7 @@ export async function retryVisionChunks(mediaFile: File, modelName: string, apiK
 
 export async function alignMissingLines(missingLines: {index: number, text: string}[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 5; 
+    const chunkSize = 10; 
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     let lastChunkStartTime = 0;
@@ -698,7 +698,8 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
                             }
                             
                             let calculatedStart = matchedSegment.start;
-                            const rawText = (matchedSegment.text || "").toLowerCase();
+                            const rawTextOriginal = (matchedSegment.text || "").toLowerCase();
+                            const rawText = rawTextOriginal.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
                             
                             const draftObj = chunkLines.find((l: any) => l.index === p.lineIndex);
                             const draftStr = draftObj ? draftObj.text : "";
@@ -758,7 +759,7 @@ export async function alignMissingLines(missingLines: {index: number, text: stri
 
 export async function alignTextWithRawVision(draftLines: string[], rawSegments: any[], modelName: string, apiKey: string, reportProgress: (msg: string) => void, options?: TranscriptionOptions): Promise<{aligned: any[], debugLogs: any[]}> {
     const ai = new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY || '' });
-    const chunkSize = 5; // Reverted back to 5 to speed up alignment
+    const chunkSize = 10; // Process 10 lines at a time to give the AI more context
     let allAligned: any[] = [];
     let debugLogs: any[] = [];
     let lastChunkStartTime = 0;
@@ -813,10 +814,10 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
         
         CRITICAL RULES:
         1. You MUST include EVERY line from the provided DRAFT TRANSCRIPT.
-        2. 'lineIndex' MUST match the index in the draft exactly (e.g., ${startIndex}, ${startIndex+1}).
-        3. 'rawId' MUST be the integer ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS. Use the exact words to find the true starting segment.
+        2. 'lineIndex' MUST match the index in the draft exactly.
+        3. 'rawId' MUST be the exact ID from the RAW TRANSCRIPT JSON where the DRAFT line BEGINS. Read carefully! If a draft line starts with words in the middle of a raw text string, use THAT raw string's ID. Do NOT select the ID of the previous sequence!
         4. The matched 'rawId' must correspond to a time >= the PREVIOUS MATCHED TIMESTAMP.
-        5. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that matches the FIRST FEW WORDS of the DRAFT line. If the DRAFT line starts with "it requires", the matchedRawText MUST start with "it requires". DO NOT match it to leftover words from the previous DRAFT line!
+        5. 'matchedRawText' MUST contain the EXACT text snippet from the RAW TRANSCRIPT that matches the FIRST FEW WORDS of the DRAFT line. 
         6. Return ONLY valid JSON in this format: [{"lineIndex": ${startIndex}, "matchedRawText": "...", "rawId": 45}, ...]`;
         
         let parsed: any[] | null = null;
@@ -877,7 +878,8 @@ export async function alignTextWithRawVision(draftLines: string[], rawSegments: 
                             }
                             
                             let calculatedStart = matchedSegment.start;
-                            const rawText = (matchedSegment.text || "").toLowerCase();
+                            const rawTextOriginal = (matchedSegment.text || "").toLowerCase();
+                            const rawText = rawTextOriginal.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
                             
                             const draftStr = chunkLines[p.lineIndex - startIndex] || "";
                             
