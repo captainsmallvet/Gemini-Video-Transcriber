@@ -90,7 +90,7 @@ const App: React.FC = () => {
   }, [isLoading]);
 
   // Model Selection State
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite-preview');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite');
   const models = [
     { id: 'gemini-3-flash-preview', name: '(20)Gemini 3 Flash Preview' },
     { id: 'gemini-3.1-pro-preview', name: '(0)Gemini 3.1 Pro Preview' },
