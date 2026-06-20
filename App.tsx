@@ -190,18 +190,37 @@ const App: React.FC = () => {
     }
   };
 
+  const processDraftFile = async (file: File) => {
+    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+        setDraftFile(file);
+        const text = await file.text();
+        setDraftText(text);
+        setError(null);
+    } else {
+        setError('Please select a valid .txt file.');
+    }
+  };
+
   const handleDraftChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-          setDraftFile(file);
-          const text = await file.text();
-          setDraftText(text);
-          setError(null);
-      } else {
-          setError('Please select a valid .txt file.');
-      }
+      await processDraftFile(e.target.files[0]);
     }
+  };
+
+  const handleDraftClick = async () => {
+    try {
+      const file = await triggerOpenFilePicker({
+        description: 'Text Files',
+        accept: { 'text/plain': ['.txt'] }
+      });
+      if (file) {
+        await processDraftFile(file);
+        return;
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
+    }
+    draftInputRef.current?.click();
   };
 
   const removeDraft = (e: React.MouseEvent) => {
@@ -279,7 +298,22 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUploadClick = () => {
+  const handleUploadClick = async () => {
+    try {
+      const file = await triggerOpenFilePicker({
+        description: 'Media Files',
+        accept: {
+          'video/*': [],
+          'audio/*': []
+        }
+      });
+      if (file) {
+        handleFileSelect(file);
+        return;
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -631,19 +665,67 @@ const App: React.FC = () => {
       }
   };
 
-  const saveJSON = (data: any[] | null, filename: string) => {
-      if (!data) return;
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const triggerSaveFile = async (content: string, defaultFilename: string, mimeType: string, extension: string) => {
+      if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+          try {
+              const handle = await (window as any).showSaveFilePicker({
+                  id: 'gemini_transcriber_assets',
+                  suggestedName: defaultFilename,
+                  types: [{
+                      description: `${extension.toUpperCase()} Files`,
+                      accept: { [mimeType]: [`.${extension}`] }
+                  }]
+              });
+              const writable = await handle.createWritable();
+              await writable.write(content);
+              await writable.close();
+              return true;
+          } catch (err: any) {
+              if (err.name === 'AbortError') {
+                  return true;
+              }
+              console.warn("File System Access API showSaveFilePicker failed, falling back:", err);
+          }
+      }
+
+      const blob = new Blob([content], { type: mimeType });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = filename;
+      link.download = defaultFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(link.href);
+      return false;
   };
 
-  const saveSRT = (data: any[] | null, filename: string) => {
+  const triggerOpenFilePicker = async (acceptTypes: { description: string, accept: Record<string, string[]> }) => {
+      if (typeof window !== 'undefined' && 'showOpenFilePicker' in window) {
+          try {
+              const [fileHandle] = await (window as any).showOpenFilePicker({
+                  id: 'gemini_transcriber_assets',
+                  types: [acceptTypes],
+                  multiple: false
+              });
+              const file = await fileHandle.getFile();
+              return file;
+          } catch (err: any) {
+              if (err.name === 'AbortError') {
+                  throw err;
+              }
+              console.warn("File System Access API showOpenFilePicker failed, falling back:", err);
+          }
+      }
+      return null;
+  };
+
+  const saveJSON = async (data: any[] | null, filename: string) => {
+      if (!data) return;
+      const content = JSON.stringify(data, null, 2);
+      await triggerSaveFile(content, filename, 'application/json', 'json');
+  };
+
+  const saveSRT = async (data: any[] | null, filename: string) => {
       if (!data || data.length === 0) return;
       
       let srtContent = '';
@@ -653,14 +735,26 @@ const App: React.FC = () => {
           srtContent += `${seg.text}\n\n`;
       });
 
-      const blob = new Blob([srtContent], { type: 'application/octet-stream' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
+      await triggerSaveFile(srtContent, filename, 'application/octet-stream', 'srt');
+  };
+
+  const handleJSONClick = async (setter: React.Dispatch<React.SetStateAction<any[] | null>>, ref: React.RefObject<HTMLInputElement | null>) => {
+      try {
+          const file = await triggerOpenFilePicker({
+              description: 'JSON Files',
+              accept: { 'application/json': ['.json'] }
+          });
+          if (file) {
+              const text = await file.text();
+              const parsed = JSON.parse(text);
+              setter(parsed);
+              setError(null);
+              return;
+          }
+      } catch (e: any) {
+          if (e.name === 'AbortError') return;
+      }
+      ref.current?.click();
   };
 
   const removeFile = () => {
@@ -726,25 +820,18 @@ const App: React.FC = () => {
     return transcript || "";
   };
 
-  const handleSaveSRT = () => {
+  const handleSaveSRT = async () => {
     if (segments.length > 0 && videoFile) {
       const srtContent = generateSRTText();
       const baseFilename = videoFile.name.lastIndexOf('.') > -1
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
         : videoFile.name;
       const filename = `${baseFilename}.srt`;
-      const blob = new Blob([srtContent], { type: 'application/octet-stream' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
+      await triggerSaveFile(srtContent, filename, 'application/octet-stream', 'srt');
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (transcript && videoFile) {
       const baseFilename = videoFile.name.lastIndexOf('.') > -1
         ? videoFile.name.substring(0, videoFile.name.lastIndexOf('.'))
@@ -754,14 +841,7 @@ const App: React.FC = () => {
 
       const durationString = videoDuration ? ` ${formatDuration(videoDuration)}` : '';
       const filename = `audio script with timestamp - ${baseFilename}${durationString}.txt`;
-      const blob = new Blob([contentToSave], { type: 'text/plain;charset=utf-8' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
+      await triggerSaveFile(contentToSave, filename, 'text/plain;charset=utf-8', 'txt');
     }
   };
 
@@ -902,7 +982,7 @@ const App: React.FC = () => {
               <h2 className="text-lg font-semibold text-center text-gray-200">2. Upload Draft (.txt) (Optional)</h2>
               {!draftFile ? (
                 <div
-                    onClick={() => draftInputRef.current?.click()}
+                    onClick={handleDraftClick}
                     className={`flex flex-col items-center justify-center p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 border-gray-600 hover:border-purple-500 hover:bg-gray-700 bg-opacity-50 h-full min-h-[200px]`}
                 >
                   <input type="file" ref={draftInputRef} onChange={handleDraftChange} accept=".txt,text/plain" className="hidden" />
@@ -1135,7 +1215,16 @@ const App: React.FC = () => {
                             {visionRawDataParsed ? (
                                 <div className="text-sm text-green-400">✓ Loaded ({visionRawDataParsed.length} segments)</div>
                             ) : (
-                                <input type="file" ref={visionRawInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setVisionRawDataParsed)} className="text-xs text-gray-300" />
+                                <div className="flex items-center space-x-2">
+                                    <button 
+                                        type="button"
+                                        onClick={() => handleJSONClick(setVisionRawDataParsed, visionRawInputRef)}
+                                        className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-600 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        Choose JSON File
+                                    </button>
+                                    <input type="file" ref={visionRawInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setVisionRawDataParsed)} className="hidden" />
+                                </div>
                             )}
                         </div>
                         <div>
@@ -1198,7 +1287,16 @@ const App: React.FC = () => {
                             {alignedDataParsed ? (
                                 <div className="text-sm text-green-400">✓ Loaded ({alignedDataParsed.length} records)</div>
                             ) : (
-                                <input type="file" ref={alignedDataInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setAlignedDataParsed)} className="text-xs text-gray-300" />
+                                <div className="flex items-center space-x-2">
+                                    <button 
+                                        type="button"
+                                        onClick={() => handleJSONClick(setAlignedDataParsed, alignedDataInputRef)}
+                                        className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-600 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        Choose JSON File
+                                    </button>
+                                    <input type="file" ref={alignedDataInputRef} accept=".json" onChange={(e) => handleJSONUpload(e, setAlignedDataParsed)} className="hidden" />
+                                </div>
                             )}
                         </div>
                         <div>
@@ -1329,16 +1427,8 @@ const App: React.FC = () => {
                 <h3 className="text-xl font-semibold text-gray-200">Vision Raw Output (Non-Continuous)</h3>
                 <div className="flex space-x-3">
                   <button
-                    onClick={() => {
-                      const blob = new Blob([visionRawData], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const link = document.createElement('a');
-                      link.href = url;
-                      link.download = 'vision_raw_data.json';
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                      URL.revokeObjectURL(url);
+                    onClick={async () => {
+                      await triggerSaveFile(visionRawData, 'vision_raw_data.json', 'application/json', 'json');
                     }}
                     className="flex items-center space-x-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors border border-gray-600"
                   >
