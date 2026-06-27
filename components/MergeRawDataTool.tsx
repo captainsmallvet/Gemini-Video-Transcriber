@@ -17,6 +17,133 @@ interface MergeRawDataToolProps {
     onApplyToStep2?: (parsedData: any[]) => void;
 }
 
+interface OverlapFixOption {
+    type: 'trim_prev' | 'trim_next' | 'remove_duplicate';
+    label: string;
+    newPrevText: string;
+    newNextText: string;
+}
+
+function getOverlapFixes(prevText: string, nextText: string): OverlapFixOption[] {
+    const cleanStr = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+    const pClean = cleanStr(prevText);
+    const nClean = cleanStr(nextText);
+    
+    if (!pClean || !nClean) return [];
+
+    const pWords = pClean.split(/\s+/);
+    const nWords = nClean.split(/\s+/);
+
+    const originalPrevWords = prevText.trim().split(/\s+/);
+    const originalNextWords = nextText.trim().split(/\s+/);
+
+    const options: OverlapFixOption[] = [];
+
+    // Check 1: 100% Identical
+    if (pClean === nClean) {
+        options.push({
+            type: 'remove_duplicate',
+            label: `ลบ Block สองทิ้ง (เนื่องจากข้อความซ้ำกัน 100%)`,
+            newPrevText: prevText,
+            newNextText: ''
+        });
+        return options;
+    }
+
+    // Check 2: Substring overlap
+    // If next is a complete suffix of prev
+    if (pClean.endsWith(nClean)) {
+        if (originalPrevWords.length > originalNextWords.length) {
+            const newPrev = originalPrevWords.slice(0, originalPrevWords.length - originalNextWords.length).join(' ');
+            options.push({
+                type: 'trim_prev',
+                label: `ลบคำท้าย Block แรกที่เป็นคำของ Block สองทั้งหมด ("${nextText}")`,
+                newPrevText: newPrev,
+                newNextText: nextText
+            });
+        }
+    }
+    // If next is a complete prefix of prev
+    else if (pClean.startsWith(nClean)) {
+        if (originalPrevWords.length > originalNextWords.length) {
+            const newPrev = originalPrevWords.slice(originalNextWords.length).join(' ');
+            options.push({
+                type: 'trim_prev',
+                label: `ลบคำต้น Block แรกที่เป็นคำของ Block สองทั้งหมด ("${nextText}")`,
+                newPrevText: newPrev,
+                newNextText: nextText
+            });
+        }
+    }
+    // If prev is a complete suffix of next
+    else if (nClean.endsWith(pClean)) {
+        if (originalNextWords.length > originalPrevWords.length) {
+            const newNext = originalNextWords.slice(0, originalNextWords.length - originalPrevWords.length).join(' ');
+            options.push({
+                type: 'trim_next',
+                label: `ลบคำท้าย Block สองที่เป็นคำของ Block แรกทั้งหมด ("${prevText}")`,
+                newPrevText: prevText,
+                newNextText: newNext
+            });
+        }
+    }
+    // If prev is a complete prefix of next
+    else if (nClean.startsWith(pClean)) {
+        if (originalNextWords.length > originalPrevWords.length) {
+            const newNext = originalNextWords.slice(originalPrevWords.length).join(' ');
+            options.push({
+                type: 'trim_next',
+                label: `ลบคำต้น Block สองที่เป็นคำของ Block แรกทั้งหมด ("${prevText}")`,
+                newPrevText: prevText,
+                newNextText: newNext
+            });
+        }
+    }
+
+    // Check 3: Partial Prefix-Suffix Overlap (e.g., prev ends with words that next starts with)
+    let maxOverlapLen = 0;
+    const maxPossible = Math.min(pWords.length, nWords.length);
+    for (let len = 1; len <= maxPossible; len++) {
+        const pSuffix = pWords.slice(pWords.length - len).join(' ');
+        const nPrefix = nWords.slice(0, len).join(' ');
+        if (pSuffix === nPrefix) {
+            maxOverlapLen = len;
+        }
+    }
+
+    if (maxOverlapLen > 0 && maxOverlapLen < originalPrevWords.length && maxOverlapLen < originalNextWords.length) {
+        const overlappingPhrase = originalNextWords.slice(0, maxOverlapLen).join(' ');
+        const newPrevText = originalPrevWords.slice(0, originalPrevWords.length - maxOverlapLen).join(' ');
+        const newNextText = originalNextWords.slice(maxOverlapLen).join(' ');
+
+        if (newPrevText.trim().length > 0) {
+            options.push({
+                type: 'trim_prev',
+                label: `ลบคำซ้ำท้าย Block แรก ("${overlappingPhrase}")`,
+                newPrevText,
+                newNextText: nextText
+            });
+        }
+        if (newNextText.trim().length > 0) {
+            options.push({
+                type: 'trim_next',
+                label: `ลบคำซ้ำต้น Block สอง ("${overlappingPhrase}")`,
+                newPrevText: prevText,
+                newNextText
+            });
+        }
+    }
+
+    // Deduplicate and filter out redundant options
+    const seen = new Set<string>();
+    return options.filter(opt => {
+        const key = `${opt.newPrevText.trim()}||${opt.newNextText.trim()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return opt.newPrevText.trim() !== prevText.trim() || opt.newNextText.trim() !== nextText.trim();
+    });
+}
+
 export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToStep2 }) => {
     const [files, setFiles] = useState<File[]>([]);
     const [mergedData, setMergedData] = useState<MergedEntry[]>([]);
@@ -267,6 +394,21 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
         setMergedData(newData);
     };
 
+    const applyOverlapFix = (index: number, newPrevText: string, newNextText: string) => {
+        const newData = [...mergedData];
+        if (newNextText.trim() === '') {
+            newData[index] = { ...newData[index], text: newPrevText };
+            newData.splice(index + 1, 1);
+        } else if (newPrevText.trim() === '') {
+            newData[index + 1] = { ...newData[index + 1], text: newNextText };
+            newData.splice(index, 1);
+        } else {
+            newData[index] = { ...newData[index], text: newPrevText };
+            newData[index + 1] = { ...newData[index + 1], text: newNextText };
+        }
+        setMergedData(newData);
+    };
+
     const downloadJson = () => {
         const exportData = mergedData.map(({ text, start, end }) => ({ text, start, end }));
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -397,6 +539,10 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                         </div>
                     </div>
 
+                    <div className="text-xs text-blue-300 bg-blue-950 bg-opacity-30 border border-blue-800 rounded-lg p-3 mb-1 leading-relaxed">
+                        💡 <strong>คำแนะนำ:</strong> คุณสามารถแก้ไขข้อความหรือปรับเวลาได้โดยตรงในแต่ละ Block ด้านล่างนี้ หรือหากตรวจพบคำซ้ำ/ประโยคซ้อนทับกันระหว่าง 2 Block ระบบจะแสดงตัวเลือกการลบคำซ้ำอัตโนมัติ (ปุ่มสีส้ม) ให้คลิกจัดการได้ทันทีอย่างง่ายดาย
+                    </div>
+
                     <div className="max-h-[500px] overflow-y-auto pr-2 space-y-2">
                         {mergedData.map((entry, idx) => (
                             <div 
@@ -440,7 +586,8 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                                     <textarea 
                                         value={entry.text}
                                         onChange={(e) => handleEntryChange(idx, 'text', e.target.value)}
-                                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 resize-y min-h-[40px] outline-none focus:border-blue-500"
+                                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 resize-y min-h-[40px] outline-none focus:border-blue-500 animate-pulse-subtle"
+                                        placeholder="แก้ไขข้อความที่นี่..."
                                     />
                                     <button 
                                         onClick={() => handleRemoveEntry(idx)}
@@ -491,6 +638,31 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                                             return null;
                                         })}
                                     </div>
+
+                                    {/* Overlap Fix Recommendations */}
+                                    {idx < mergedData.length - 1 && (() => {
+                                        const fixes = getOverlapFixes(entry.text, mergedData[idx + 1].text);
+                                        if (fixes.length === 0) return null;
+                                        return (
+                                            <div className="mt-2.5 p-2 bg-yellow-950 bg-opacity-30 border border-yellow-800 border-dashed rounded-lg flex flex-col gap-1.5">
+                                                <div className="flex items-center gap-1 text-[11px] text-yellow-300 font-medium">
+                                                    <span className="text-yellow-400 font-semibold">⚠️ ตรวจพบคำหรือข้อความซ้ำซ้อนกับ Block ถัดไป:</span>
+                                                </div>
+                                                <div className="flex flex-col sm:flex-row flex-wrap gap-1.5">
+                                                    {fixes.map((fix, fIdx) => (
+                                                        <button
+                                                            key={fIdx}
+                                                            type="button"
+                                                            onClick={() => applyOverlapFix(idx, fix.newPrevText, fix.newNextText)}
+                                                            className="text-left text-xs bg-yellow-900 bg-opacity-60 hover:bg-yellow-800 hover:text-white text-yellow-100 px-2 py-1 rounded border border-yellow-700 transition-colors cursor-pointer"
+                                                        >
+                                                            {fix.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         ))}
