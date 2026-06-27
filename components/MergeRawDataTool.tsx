@@ -22,6 +22,47 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
     const [mergedData, setMergedData] = useState<MergedEntry[]>([]);
     const [error, setError] = useState<string | null>(null);
 
+    const [currentAddedNavIdx, setCurrentAddedNavIdx] = useState<number>(0);
+    const [currentAdjustedNavIdx, setCurrentAdjustedNavIdx] = useState<number>(0);
+
+    const addedIndices = mergedData.map((e, idx) => e.isAdded ? idx : -1).filter(idx => idx !== -1);
+    const adjustedIndices = mergedData.map((e, idx) => e.isTimingAdjusted ? idx : -1).filter(idx => idx !== -1);
+
+    const scrollToBlock = (idx: number) => {
+        const element = document.getElementById(`block-${idx}`);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('ring-4', 'ring-blue-500', 'transition-all');
+            setTimeout(() => {
+                element.classList.remove('ring-4', 'ring-blue-500');
+            }, 1500);
+        }
+    };
+
+    const handleJumpTo = (type: 'added' | 'adjusted', direction: 'next' | 'prev') => {
+        const indices = type === 'added' ? addedIndices : adjustedIndices;
+        if (indices.length === 0) return;
+
+        let newIdx = 0;
+        if (type === 'added') {
+            if (direction === 'next') {
+                newIdx = (currentAddedNavIdx + 1) % indices.length;
+            } else {
+                newIdx = (currentAddedNavIdx - 1 + indices.length) % indices.length;
+            }
+            setCurrentAddedNavIdx(newIdx);
+            scrollToBlock(indices[newIdx]);
+        } else {
+            if (direction === 'next') {
+                newIdx = (currentAdjustedNavIdx + 1) % indices.length;
+            } else {
+                newIdx = (currentAdjustedNavIdx - 1 + indices.length) % indices.length;
+            }
+            setCurrentAdjustedNavIdx(newIdx);
+            scrollToBlock(indices[newIdx]);
+        }
+    };
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
             setFiles(Array.from(e.target.files));
@@ -205,6 +246,8 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                 merged[0].start = 0;
             }
             setMergedData(merged);
+            setCurrentAddedNavIdx(0);
+            setCurrentAdjustedNavIdx(0);
 
         } catch (err) {
             setError('Error parsing or merging files. Make sure they are valid vision_raw_data JSON files.');
@@ -289,13 +332,68 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
 
             {mergedData.length > 0 && (
                 <div className="flex flex-col gap-4">
-                    <div className="flex justify-between items-center mb-2">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-2">
                         <span className="text-sm text-gray-300 font-bold bg-gray-900 px-3 py-1 rounded">
                             Found {mergedData.length} total segments
                         </span>
-                        <div className="flex gap-2">
-                            <span className="text-xs px-2 py-1 rounded bg-green-900 text-green-300 border border-green-700">Added missing subtitle</span>
-                            <span className="text-xs px-2 py-1 rounded bg-yellow-900 text-yellow-300 border border-yellow-700">Adjusted timing</span>
+                        <div className="flex flex-wrap gap-2 items-center">
+                            {addedIndices.length > 0 ? (
+                                <div className="flex items-center gap-1.5 bg-green-950 bg-opacity-40 border border-green-800 rounded-lg p-1 text-xs text-green-300">
+                                    <span className="font-semibold px-1.5 text-green-400">Added subtitle ({addedIndices.length})</span>
+                                    <div className="flex items-center gap-1 bg-green-900 bg-opacity-30 rounded px-1 py-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleJumpTo('added', 'prev')}
+                                            className="hover:bg-green-700 hover:text-white bg-green-800 bg-opacity-60 px-1.5 py-0.5 rounded text-white font-bold text-xs transition-colors"
+                                            title="Previous added block"
+                                        >
+                                            &larr;
+                                        </button>
+                                        <span className="font-mono text-[10px] px-1">{currentAddedNavIdx + 1}/{addedIndices.length}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleJumpTo('added', 'next')}
+                                            className="hover:bg-green-700 hover:text-white bg-green-800 bg-opacity-60 px-1.5 py-0.5 rounded text-white font-bold text-xs transition-colors"
+                                            title="Next added block"
+                                        >
+                                            &rarr;
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <span className="text-xs px-2 py-1 rounded bg-gray-900 text-gray-500 border border-gray-800 opacity-60">
+                                    Added subtitle (0)
+                                </span>
+                            )}
+
+                            {adjustedIndices.length > 0 ? (
+                                <div className="flex items-center gap-1.5 bg-yellow-950 bg-opacity-40 border border-yellow-800 rounded-lg p-1 text-xs text-yellow-300">
+                                    <span className="font-semibold px-1.5 text-yellow-400">Adjusted timing ({adjustedIndices.length})</span>
+                                    <div className="flex items-center gap-1 bg-yellow-900 bg-opacity-30 rounded px-1 py-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleJumpTo('adjusted', 'prev')}
+                                            className="hover:bg-yellow-700 hover:text-white bg-yellow-800 bg-opacity-60 px-1.5 py-0.5 rounded text-white font-bold text-xs transition-colors"
+                                            title="Previous adjusted block"
+                                        >
+                                            &larr;
+                                        </button>
+                                        <span className="font-mono text-[10px] px-1">{currentAdjustedNavIdx + 1}/{adjustedIndices.length}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleJumpTo('adjusted', 'next')}
+                                            className="hover:bg-yellow-700 hover:text-white bg-yellow-800 bg-opacity-60 px-1.5 py-0.5 rounded text-white font-bold text-xs transition-colors"
+                                            title="Next adjusted block"
+                                        >
+                                            &rarr;
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <span className="text-xs px-2 py-1 rounded bg-gray-900 text-gray-500 border border-gray-800 opacity-60">
+                                    Adjusted timing (0)
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -303,7 +401,8 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                         {mergedData.map((entry, idx) => (
                             <div 
                                 key={entry.id} 
-                                className={`p-3 rounded border flex flex-col sm:flex-row gap-3 items-start sm:items-center
+                                id={`block-${idx}`}
+                                className={`p-3 rounded border flex flex-col sm:flex-row gap-3 items-start sm:items-center transition-all duration-300
                                     ${entry.isAdded ? 'border-green-600 bg-green-900 bg-opacity-20' : 
                                       entry.isTimingAdjusted ? 'border-yellow-600 bg-yellow-900 bg-opacity-20' : 
                                       'border-gray-700 bg-gray-900'}`
