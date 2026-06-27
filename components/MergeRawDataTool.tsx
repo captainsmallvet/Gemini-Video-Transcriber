@@ -449,6 +449,48 @@ export const MergeRawDataTool: React.FC<MergeRawDataToolProps> = ({ onApplyToSte
                                     >
                                         ✕
                                     </button>
+                                    
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                        {/* Status Indicators */}
+                                        {entry.isAdded && (
+                                            <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-green-900 bg-opacity-80 text-green-300 border border-green-700">
+                                                Added
+                                            </span>
+                                        )}
+                                        {entry.isTimingAdjusted && (
+                                            <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-yellow-900 bg-opacity-80 text-yellow-300 border border-yellow-700">
+                                                Adjusted
+                                            </span>
+                                        )}
+                                        
+                                        {/* Source Files list */}
+                                        <span className="text-[10px] text-gray-400 font-medium ml-1">Sources:</span>
+                                        {entry.sources.map(srcIdx => (
+                                            <span 
+                                                key={srcIdx} 
+                                                className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-gray-850 text-gray-300 border border-gray-700 max-w-[150px] sm:max-w-[200px] truncate"
+                                                title={files[srcIdx]?.name}
+                                            >
+                                                <span className="text-green-400">✓</span>
+                                                <span className="truncate">{files[srcIdx]?.name || `File ${srcIdx + 1}`}</span>
+                                            </span>
+                                        ))}
+                                        {files.map((_, fIdx) => {
+                                            if (!entry.sources.includes(fIdx)) {
+                                                return (
+                                                    <span 
+                                                        key={fIdx} 
+                                                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-gray-850 bg-opacity-40 text-gray-500 border border-gray-700 border-dashed line-through max-w-[150px] sm:max-w-[200px] truncate"
+                                                        title={`Missing from: ${files[fIdx]?.name}`}
+                                                    >
+                                                        <span className="text-red-500">✗</span>
+                                                        <span className="truncate">{files[fIdx]?.name || `File ${fIdx + 1}`}</span>
+                                                    </span>
+                                                );
+                                            }
+                                            return null;
+                                        })}
+                                    </div>
                                 </div>
                             </div>
                         ))}
