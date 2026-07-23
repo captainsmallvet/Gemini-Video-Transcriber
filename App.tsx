@@ -4,6 +4,7 @@ import { transcribeVideo, alignDraftWithAudio, transcribeVideoVisionOnly, alignT
 import Spinner from './components/Spinner';
 
 import { MergeRawDataTool } from './components/MergeRawDataTool';
+import { fetchCentralModels, getDefaultModelForLevel, AIModel, FALLBACK_MODELS, APP_IMPORTANCE_LEVEL } from './services/centralModelService';
 const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [draftFile, setDraftFile] = useState<File | null>(null);
@@ -89,20 +90,31 @@ const App: React.FC = () => {
     };
   }, [isLoading]);
 
-  // Model Selection State
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-flash-lite');
-  const models = [
-    { id: 'gemini-3.5-flash', name: '(20)Gemini 3.5 Flash' },
-    { id: 'gemini-3-flash-preview', name: '(20)Gemini 3 Flash Preview' },
-    { id: 'gemini-3.1-pro-preview', name: '(0)Gemini 3.1 Pro Preview' },
-    { id: 'gemini-3.1-flash-lite', name: '(500)Gemini 3.1 Flash Lite' },
-    { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
-    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest' },
-    { id: 'gemini-2.5-flash', name: '(20)Gemini 2.5 Flash' },
-    { id: 'gemini-2.5-flash-lite', name: '(20)Gemini 2.5 Flash Lite' },
-    { id: 'gemini-2.5-pro', name: '(0)Gemini 2.5 Pro' },
-    { id: 'gemini-pro-latest', name: 'Gemini Pro (Latest Stable)' },
-  ];
+  // Central AI Models Selection State (Importance Level: Level 2)
+  const [textModels, setTextModels] = useState<AIModel[]>(FALLBACK_MODELS.text_reasoning);
+  const [selectedModel, setSelectedModel] = useState<string>(() => 
+    getDefaultModelForLevel(FALLBACK_MODELS.text_reasoning, APP_IMPORTANCE_LEVEL)
+  );
+
+  // Fetch Centralized Models on page load / page refresh
+  useEffect(() => {
+    let isMounted = true;
+    const loadCentralModels = async () => {
+      const allModels = await fetchCentralModels();
+      if (!isMounted) return;
+
+      const activeTextModels = allModels.text_reasoning || [];
+      if (activeTextModels.length > 0) {
+        setTextModels(activeTextModels);
+        // Requirement: Always set default model for Level 2 on page refresh
+        const defaultModelId = getDefaultModelForLevel(activeTextModels, APP_IMPORTANCE_LEVEL);
+        setSelectedModel(defaultModelId);
+      }
+    };
+
+    loadCentralModels();
+    return () => { isMounted = false; };
+  }, []);
 
   // API Key Management State
   const [apiKeyInput, setApiKeyInput] = useState<string>('');
@@ -866,8 +878,8 @@ const App: React.FC = () => {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="bg-gray-900 border border-gray-700 text-gray-100 text-[11px] rounded-md px-2 py-1 focus:ring-1 focus:ring-purple-500 outline-none cursor-pointer transition-colors"
                 >
-                  {models.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
+                  {textModels.map(m => (
+                    <option key={m.modelId} value={m.modelId}>{m.name}</option>
                   ))}
                 </select>
               </div>
@@ -915,7 +927,7 @@ const App: React.FC = () => {
           <p className="mt-4 text-lg text-gray-300">
             Upload a video to get a timestamped transcript using
             <br />
-            <span className="text-purple-400 font-semibold">{models.find(m => m.id === selectedModel)?.name}</span>
+            <span className="text-purple-400 font-semibold">{textModels.find(m => m.modelId === selectedModel)?.name || selectedModel}</span>
           </p>
         </header>
 
